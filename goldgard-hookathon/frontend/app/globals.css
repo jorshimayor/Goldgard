@@ -1,0 +1,65 @@
+@import "tailwindcss";
+
+:root {
+  --gg-bg: #0a1428;
+  --gg-fg: #e8eef8;
+  --gg-muted: rgba(232, 238, 248, 0.7);
+  --gg-surface: rgba(255, 255, 255, 0.06);
+  --gg-surface-2: rgba(255, 255, 255, 0.09);
+  --gg-border: rgba(255, 255, 255, 0.1);
+  --gg-gold: #d4af77;
+  --gg-gold-2: #ffd700;
+  --gg-blood: #b81d2d;
+  --gg-shadow: rgba(0, 0, 0, 0.45);
+}
+
+@theme inline {
+  --color-background: var(--gg-bg);
+  --color-foreground: var(--gg-fg);
+  --color-gg-muted: var(--gg-muted);
+  --color-gg-surface: var(--gg-surface);
+  --color-gg-surface-2: var(--gg-surface-2);
+  --color-gg-border: var(--gg-border);
+  --color-gg-gold: var(--gg-gold);
+  --color-gg-gold-2: var(--gg-gold-2);
+  --color-gg-blood: var(--gg-blood);
+  --shadow-gg: 0 20px 60px var(--gg-shadow);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+body {
+  background: var(--gg-bg);
+  color: var(--gg-fg);
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+.gg-bg {
+  background:
+    radial-gradient(1200px 600px at 30% -20%, rgba(212, 175, 119, 0.18), transparent 60%),
+    radial-gradient(900px 500px at 90% 0%, rgba(255, 215, 0, 0.08), transparent 55%),
+    radial-gradient(900px 700px at 20% 110%, rgba(184, 29, 45, 0.10), transparent 60%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.04), transparent 220px);
+}
+
+.gg-runes {
+  position: relative;
+}
+
+.gg-runes::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.16;
+  mix-blend-mode: overlay;
+  background-image:
+    repeating-linear-gradient(
+      135deg,
+      rgba(255, 255, 255, 0.06) 0px,
+      rgba(255, 255, 255, 0.06) 1px,
+      transparent 1px,
+      transparent 18px
+    );
+  mask-image: radial-gradient(700px 700px at 30% 20%, black, transparent 70%);
+}

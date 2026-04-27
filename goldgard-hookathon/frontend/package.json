@@ -1,0 +1,36 @@
+{
+  "name": "frontend",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint"
+  },
+  "dependencies": {
+    "@rainbow-me/rainbowkit": "^2.2.5",
+    "@tanstack/react-query": "^5.76.2",
+    "clsx": "^2.1.1",
+    "framer-motion": "^11.18.2",
+    "lucide-react": "^0.511.0",
+    "next": "15.2.0",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "recharts": "^2.15.3",
+    "tailwind-merge": "^2.6.0",
+    "viem": "^2.30.1",
+    "wagmi": "^2.15.6",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4",
+    "@types/node": "^20",
+    "@types/react": "^18",
+    "@types/react-dom": "^18",
+    "eslint": "^9",
+    "eslint-config-next": "15.2.0",
+    "tailwindcss": "^4",
+    "typescript": "^5"
+  }
+}

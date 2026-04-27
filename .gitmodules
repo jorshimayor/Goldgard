@@ -1,0 +1,15 @@
+[submodule "goldgard-hookathon/contracts/lib/solmate"]
+	path = goldgard-hookathon/contracts/lib/solmate
+	url = https://github.com/transmissions11/solmate
+[submodule "goldgard-hookathon/contracts/lib/forge-std"]
+	path = goldgard-hookathon/contracts/lib/forge-std
+	url = https://github.com/foundry-rs/forge-std
+[submodule "goldgard-hookathon/contracts/lib/openzeppelin-contracts"]
+	path = goldgard-hookathon/contracts/lib/openzeppelin-contracts
+	url = https://github.com/OpenZeppelin/openzeppelin-contracts
+[submodule "goldgard-hookathon/contracts/lib/v4-core"]
+	path = goldgard-hookathon/contracts/lib/v4-core
+	url = https://github.com/Uniswap/v4-core
+[submodule "goldgard-hookathon/contracts/lib/v4-periphery"]
+	path = goldgard-hookathon/contracts/lib/v4-periphery
+	url = https://github.com/Uniswap/v4-periphery
