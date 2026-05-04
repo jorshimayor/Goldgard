@@ -6,7 +6,10 @@ import {PoolKey} from "v4-core/types/PoolKey.sol";
 import {BalanceDelta} from "v4-core/types/BalanceDelta.sol";
 import {BeforeSwapDelta} from "v4-core/types/BeforeSwapDelta.sol";
 import {IPoolManager} from "v4-core/interfaces/IPoolManager.sol";
-import {ModifyLiquidityParams, SwapParams} from "v4-core/types/PoolOperation.sol";
+import {
+    ModifyLiquidityParams,
+    SwapParams
+} from "v4-core/types/PoolOperation.sol";
 
 abstract contract BaseHook is IHooks {
     error HookNotImplemented();
@@ -23,19 +26,29 @@ abstract contract BaseHook is IHooks {
         _;
     }
 
-    function beforeInitialize(address, PoolKey calldata, uint160) external virtual returns (bytes4) {
+    function beforeInitialize(
+        address,
+        PoolKey calldata,
+        uint160
+    ) external virtual returns (bytes4) {
         revert HookNotImplemented();
     }
 
-    function afterInitialize(address, PoolKey calldata, uint160, int24) external virtual returns (bytes4) {
+    function afterInitialize(
+        address,
+        PoolKey calldata,
+        uint160,
+        int24
+    ) external virtual returns (bytes4) {
         revert HookNotImplemented();
     }
 
-    function beforeAddLiquidity(address, PoolKey calldata, ModifyLiquidityParams calldata, bytes calldata)
-        external
-        virtual
-        returns (bytes4)
-    {
+    function beforeAddLiquidity(
+        address,
+        PoolKey calldata,
+        ModifyLiquidityParams calldata,
+        bytes calldata
+    ) external virtual returns (bytes4) {
         revert HookNotImplemented();
     }
 
@@ -50,11 +63,12 @@ abstract contract BaseHook is IHooks {
         revert HookNotImplemented();
     }
 
-    function beforeRemoveLiquidity(address, PoolKey calldata, ModifyLiquidityParams calldata, bytes calldata)
-        external
-        virtual
-        returns (bytes4)
-    {
+    function beforeRemoveLiquidity(
+        address,
+        PoolKey calldata,
+        ModifyLiquidityParams calldata,
+        bytes calldata
+    ) external virtual returns (bytes4) {
         revert HookNotImplemented();
     }
 
@@ -69,35 +83,42 @@ abstract contract BaseHook is IHooks {
         revert HookNotImplemented();
     }
 
-    function beforeSwap(address, PoolKey calldata, SwapParams calldata, bytes calldata)
-        external
-        virtual
-        returns (bytes4, BeforeSwapDelta, uint24)
-    {
+    function beforeSwap(
+        address,
+        PoolKey calldata,
+        SwapParams calldata,
+        bytes calldata
+    ) external virtual returns (bytes4, BeforeSwapDelta, uint24) {
         revert HookNotImplemented();
     }
 
-    function afterSwap(address, PoolKey calldata, SwapParams calldata, BalanceDelta, bytes calldata)
-        external
-        virtual
-        returns (bytes4, int128)
-    {
+    function afterSwap(
+        address,
+        PoolKey calldata,
+        SwapParams calldata,
+        BalanceDelta,
+        bytes calldata
+    ) external virtual returns (bytes4, int128) {
         revert HookNotImplemented();
     }
 
-    function beforeDonate(address, PoolKey calldata, uint256, uint256, bytes calldata)
-        external
-        virtual
-        returns (bytes4)
-    {
+    function beforeDonate(
+        address,
+        PoolKey calldata,
+        uint256,
+        uint256,
+        bytes calldata
+    ) external virtual returns (bytes4) {
         revert HookNotImplemented();
     }
 
-    function afterDonate(address, PoolKey calldata, uint256, uint256, bytes calldata)
-        external
-        virtual
-        returns (bytes4)
-    {
+    function afterDonate(
+        address,
+        PoolKey calldata,
+        uint256,
+        uint256,
+        bytes calldata
+    ) external virtual returns (bytes4) {
         revert HookNotImplemented();
     }
 }

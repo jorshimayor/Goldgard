@@ -3,7 +3,9 @@ pragma solidity ^0.8.24;
 
 import {ERC6909} from "v4-core/ERC6909.sol";
 import {Ownable} from "openzeppelin-contracts/contracts/access/Ownable.sol";
-import {Ownable2Step} from "openzeppelin-contracts/contracts/access/Ownable2Step.sol";
+import {
+    Ownable2Step
+} from "openzeppelin-contracts/contracts/access/Ownable2Step.sol";
 
 contract RewardDistributor is ERC6909, Ownable2Step {
     error OnlyHook();

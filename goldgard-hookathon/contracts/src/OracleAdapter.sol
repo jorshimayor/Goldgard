@@ -2,7 +2,9 @@
 pragma solidity ^0.8.24;
 
 import {Ownable} from "openzeppelin-contracts/contracts/access/Ownable.sol";
-import {Ownable2Step} from "openzeppelin-contracts/contracts/access/Ownable2Step.sol";
+import {
+    Ownable2Step
+} from "openzeppelin-contracts/contracts/access/Ownable2Step.sol";
 import {Math} from "openzeppelin-contracts/contracts/utils/math/Math.sol";
 
 import {PoolKey} from "v4-core/types/PoolKey.sol";
@@ -44,7 +46,10 @@ contract OracleAdapter is Ownable2Step {
         hook = _hook;
     }
 
-    function setPoolOracleConfig(PoolKey calldata key, PoolOracleConfig calldata cfg) external onlyOwner {
+    function setPoolOracleConfig(
+        PoolKey calldata key,
+        PoolOracleConfig calldata cfg
+    ) external onlyOwner {
         if (cfg.maxStaleSeconds == 0) revert BadConfig();
         poolOracle[key.toId()] = PoolOracleConfig({
             aggregator: cfg.aggregator,
@@ -55,11 +60,14 @@ contract OracleAdapter is Ownable2Step {
         });
     }
 
-    function updateFromPool(IPoolManager manager, PoolKey calldata key) external {
+    function updateFromPool(
+        IPoolManager manager,
+        PoolKey calldata key
+    ) external {
         if (msg.sender != hook) revert OnlyHook();
 
         PoolId poolId = key.toId();
-        (uint160 sqrtPriceX96,,,) = manager.getSlot0(poolId);
+        (uint160 sqrtPriceX96, , , ) = manager.getSlot0(poolId);
 
         Observation storage obs = observations[poolId];
 
@@ -76,19 +84,26 @@ contract OracleAdapter is Ownable2Step {
             return;
         }
 
-        obs.sqrtPriceX96Cumulative += uint256(obs.lastSqrtPriceX96) * uint256(dt);
+        obs.sqrtPriceX96Cumulative +=
+            uint256(obs.lastSqrtPriceX96) *
+            uint256(dt);
         obs.lastUpdated = t;
         obs.lastSqrtPriceX96 = sqrtPriceX96;
     }
 
-    function getTwapSqrtPriceX96(PoolKey calldata key, uint32 windowSeconds) external view returns (uint160) {
+    function getTwapSqrtPriceX96(
+        PoolKey calldata key,
+        uint32 windowSeconds
+    ) external view returns (uint160) {
         PoolId poolId = key.toId();
         Observation memory obs = observations[poolId];
         if (obs.lastUpdated == 0) return 0;
 
         uint64 t = uint64(block.timestamp);
         uint64 dt = t - obs.lastUpdated;
-        uint256 cumulative = obs.sqrtPriceX96Cumulative + uint256(obs.lastSqrtPriceX96) * uint256(dt);
+        uint256 cumulative = obs.sqrtPriceX96Cumulative +
+            uint256(obs.lastSqrtPriceX96) *
+            uint256(dt);
 
         uint64 effectiveWindow = windowSeconds;
         if (effectiveWindow == 0) effectiveWindow = 1;
@@ -101,21 +116,33 @@ contract OracleAdapter is Ownable2Step {
         return uint160(avg);
     }
 
-    function getChainlinkSqrtPriceX96(PoolKey calldata key) external view returns (uint160 sqrtPriceX96, bool ok) {
+    function getChainlinkSqrtPriceX96(
+        PoolKey calldata key
+    ) external view returns (uint160 sqrtPriceX96, bool ok) {
         PoolOracleConfig memory cfg = poolOracle[key.toId()];
         if (address(cfg.aggregator) == address(0)) return (0, false);
 
-        (, int256 answer,, uint256 updatedAt,) = cfg.aggregator.latestRoundData();
+        (, int256 answer, , uint256 updatedAt, ) = cfg
+            .aggregator
+            .latestRoundData();
         if (answer <= 0) return (0, false);
-        if (block.timestamp - updatedAt > cfg.maxStaleSeconds) return (0, false);
+        if (block.timestamp - updatedAt > cfg.maxStaleSeconds)
+            return (0, false);
 
-        uint256 price1e18 = _scaleTo1e18(uint256(answer), cfg.aggregatorDecimals);
+        uint256 price1e18 = _scaleTo1e18(
+            uint256(answer),
+            cfg.aggregatorDecimals
+        );
 
-        if (cfg.token0Decimals > 18) price1e18 = price1e18 / (10 ** (cfg.token0Decimals - 18));
-        else if (cfg.token0Decimals < 18) price1e18 = price1e18 * (10 ** (18 - cfg.token0Decimals));
+        if (cfg.token0Decimals > 18)
+            price1e18 = price1e18 / (10 ** (cfg.token0Decimals - 18));
+        else if (cfg.token0Decimals < 18)
+            price1e18 = price1e18 * (10 ** (18 - cfg.token0Decimals));
 
-        if (cfg.token1Decimals > 18) price1e18 = price1e18 * (10 ** (cfg.token1Decimals - 18));
-        else if (cfg.token1Decimals < 18) price1e18 = price1e18 / (10 ** (18 - cfg.token1Decimals));
+        if (cfg.token1Decimals > 18)
+            price1e18 = price1e18 * (10 ** (cfg.token1Decimals - 18));
+        else if (cfg.token1Decimals < 18)
+            price1e18 = price1e18 / (10 ** (18 - cfg.token1Decimals));
 
         uint256 ratioX192 = Math.mulDiv(price1e18, uint256(1) << 192, 1e18);
         uint256 sqrtRatioX96 = Math.sqrt(ratioX192);
@@ -123,14 +150,27 @@ contract OracleAdapter is Ownable2Step {
         return (uint160(sqrtRatioX96), true);
     }
 
-    function getPrice1e18(PoolKey calldata key, uint32 twapWindowSeconds) external view returns (uint256 price1e18) {
+    function getPrice1e18(
+        PoolKey calldata key,
+        uint32 twapWindowSeconds
+    ) external view returns (uint256 price1e18) {
         (uint160 cl, bool ok) = this.getChainlinkSqrtPriceX96(key);
-        uint160 sqrtPriceX96 = ok ? cl : this.getTwapSqrtPriceX96(key, twapWindowSeconds);
+        uint160 sqrtPriceX96 = ok
+            ? cl
+            : this.getTwapSqrtPriceX96(key, twapWindowSeconds);
         if (sqrtPriceX96 == 0) return 0;
-        return Math.mulDiv(uint256(sqrtPriceX96) * uint256(sqrtPriceX96), 1e18, uint256(1) << 192);
+        return
+            Math.mulDiv(
+                uint256(sqrtPriceX96) * uint256(sqrtPriceX96),
+                1e18,
+                uint256(1) << 192
+            );
     }
 
-    function _scaleTo1e18(uint256 value, uint8 decimals) internal pure returns (uint256) {
+    function _scaleTo1e18(
+        uint256 value,
+        uint8 decimals
+    ) internal pure returns (uint256) {
         if (decimals == 18) return value;
         if (decimals > 18) return value / (10 ** (decimals - 18));
         return value * (10 ** (18 - decimals));

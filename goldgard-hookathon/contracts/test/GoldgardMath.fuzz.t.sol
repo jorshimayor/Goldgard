@@ -35,12 +35,17 @@ contract GoldgardMathFuzzTest is Test {
         return r;
     }
 
-    function _impermanentLossBps(uint256 priceRatio1e18) internal pure returns (uint256) {
+    function _impermanentLossBps(
+        uint256 priceRatio1e18
+    ) internal pure returns (uint256) {
         if (priceRatio1e18 == 0) return 0;
         uint256 sqrtR1e18 = Math.sqrt(priceRatio1e18 * 1e18);
-        uint256 factor1e18 = Math.mulDiv(2 * sqrtR1e18, 1e18, 1e18 + priceRatio1e18);
+        uint256 factor1e18 = Math.mulDiv(
+            2 * sqrtR1e18,
+            1e18,
+            1e18 + priceRatio1e18
+        );
         if (factor1e18 >= 1e18) return 0;
         return Math.mulDiv(1e18 - factor1e18, BPS, 1e18);
     }
 }
-

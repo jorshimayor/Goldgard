@@ -148,9 +148,8 @@ export default function DemoConsolePage() {
             {(["trade", "prep", "execute", "review"] as const).map((s) => (
               <div
                 key={s}
-                className={`rounded-2xl border px-3 py-2 text-xs ${
-                  step === s ? "border-gg-gold bg-gg-surface" : "border-gg-border bg-gg-surface"
-                }`}
+                className={`rounded-2xl border px-3 py-2 text-xs ${step === s ? "border-gg-gold bg-gg-surface" : "border-gg-border bg-gg-surface"
+                  }`}
               >
                 <div className="flex items-center gap-2">
                   {step === s ? (
@@ -171,17 +170,15 @@ export default function DemoConsolePage() {
                 <div className="mt-1 flex gap-2">
                   <button
                     onClick={() => setDir("0to1")}
-                    className={`h-10 flex-1 rounded-xl border text-sm font-semibold ${
-                      dir === "0to1" ? "border-gg-gold bg-gg-surface" : "border-gg-border bg-gg-surface"
-                    }`}
+                    className={`h-10 flex-1 rounded-xl border text-sm font-semibold ${dir === "0to1" ? "border-gg-gold bg-gg-surface" : "border-gg-border bg-gg-surface"
+                      }`}
                   >
                     LST → USDC
                   </button>
                   <button
                     onClick={() => setDir("1to0")}
-                    className={`h-10 flex-1 rounded-xl border text-sm font-semibold ${
-                      dir === "1to0" ? "border-gg-gold bg-gg-surface" : "border-gg-border bg-gg-surface"
-                    }`}
+                    className={`h-10 flex-1 rounded-xl border text-sm font-semibold ${dir === "1to0" ? "border-gg-gold bg-gg-surface" : "border-gg-border bg-gg-surface"
+                      }`}
                   >
                     USDC → LST
                   </button>
