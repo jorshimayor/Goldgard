@@ -10,8 +10,7 @@ goldgard-hookathon/
 └── frontend/    (Next.js 15 + TypeScript + Tailwind + RainbowKit)
 ```
 
-## UHI9 Mapping (Judges)
-
+## UHI9 Mapping
 - Delta‑neutral hook: `afterSwap` computes swap deltas and rebalances against `HedgeReserve` in the same transaction.
 - Yield protection: `SafetyModule` (ERC‑4626) accumulates swap premiums; claims gated by eligibility + cooldown.
 - Fee smoothing & safety: `beforeSwap` does oracle deviation checks, dynamic LP fee override, and circuit breaker.
@@ -100,7 +99,7 @@ Goldgard contracts use `pragma solidity ^0.8.24;`. Uniswap v4-core pins `=0.8.26
 - Pitch deck outline: `pitch-deck-outline.md`
 - Product/tech/page specs: `.trae/documents/` (PRD + tech architecture + page design)
 
-## Post‑Hackathon Roadmap (Teaser)
+## Post‑Hackathon Roadmap
 
 - Head & Branch: modular hedging policies per pool archetype
 - synBNC CDP: collateralized delta‑neutral borrowing against LST yields
