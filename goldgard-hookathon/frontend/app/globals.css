@@ -11,6 +11,47 @@
   --gg-gold-2: #ffd700;
   --gg-blood: #b81d2d;
   --gg-shadow: rgba(0, 0, 0, 0.45);
+  --gg-glow: rgba(212, 175, 119, 0.3);
+}
+
+@keyframes float {
+  0%, 100% {
+    transform: translateY(0px);
+  }
+  50% {
+    transform: translateY(-10px);
+  }
+}
+
+@keyframes pulse-glow {
+  0%, 100% {
+    box-shadow: 0 0 20px rgba(212, 175, 119, 0.3);
+  }
+  50% {
+    box-shadow: 0 0 30px rgba(212, 175, 119, 0.5);
+  }
+}
+
+@keyframes gradient-shift {
+  0%, 100% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+}
+
+.animate-float {
+  animation: float 3s ease-in-out infinite;
+}
+
+.animate-pulse-glow {
+  animation: pulse-glow 2s ease-in-out infinite;
+}
+
+.animate-gradient-shift {
+  animation: gradient-shift 3s ease-in-out infinite;
+  background-size: 200% 200%;
 }
 
 @theme inline {
@@ -62,4 +103,43 @@ body {
       transparent 18px
     );
   mask-image: radial-gradient(700px 700px at 30% 20%, black, transparent 70%);
+}
+
+.card-glow {
+  position: relative;
+  border: 1px solid rgba(212, 175, 119, 0.2);
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.06) 0%, rgba(255, 255, 255, 0.03) 100%);
+  transition: all 0.3s ease;
+}
+
+.card-glow::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  background: linear-gradient(135deg, rgba(212, 175, 119, 0.4), rgba(255, 215, 0, 0.2));
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+
+.card-glow:hover::before {
+  opacity: 1;
+}
+
+.card-glow:hover {
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.09) 0%, rgba(255, 255, 255, 0.04) 100%);
+  border-color: rgba(212, 175, 119, 0.4);
+  box-shadow: 0 0 30px rgba(212, 175, 119, 0.2);
+}
+
+.gradient-text {
+  background: linear-gradient(135deg, #d4af77 0%, #ffd700 50%, #d4af77 100%);
+  background-size: 200% 200%;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
 }
