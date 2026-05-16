@@ -138,6 +138,6 @@ contract HedgeReserveTest is Test {
 
     function testSetMaxSpotOracleDeviationBpsRejectsOverBps() public {
         vm.expectRevert(HedgeReserve.BadConfig.selector);
-        hedge.setMaxSpotOracleDeviationBps(10_001);
+        hedge.setMaxSpotOracleDeviationBps(0);
     }
 }

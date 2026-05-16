@@ -59,16 +59,34 @@ contract DeployDemo is Script {
     using LPFeeLibrary for uint24;
 
     function run() external {
-        uint256 pk = vm.envUint("PRIVATE_KEY");
-        address deployer = vm.addr(pk);
-
-        vm.startBroadcast(pk);
+        uint256 pk = _privateKeyOrZero();
+        address deployer;
+        if (pk != 0) {
+            deployer = vm.addr(pk);
+            vm.startBroadcast(pk);
+        } else {
+            vm.startBroadcast();
+            deployer = tx.origin;
+        }
 
         PoolManager manager = new PoolManager(deployer);
         StateView stateView = new StateView(IUniPoolManager(address(manager)));
 
-        MockERC20 token0 = new MockERC20("LST", "LST", 18);
-        MockERC20 token1 = new MockERC20("USDC", "USDC", 18);
+        uint64 nonce = vm.getNonce(deployer);
+        address predicted0 = vm.computeCreateAddress(deployer, uint256(nonce));
+        address predicted1 = vm.computeCreateAddress(deployer, uint256(nonce) + 1);
+        bool lstFirst = predicted0 < predicted1;
+
+        MockERC20 token0;
+        MockERC20 token1;
+        if (lstFirst) {
+            token0 = new MockERC20("LST", "LST", 18);
+            token1 = new MockERC20("USDC", "USDC", 18);
+        } else {
+            token1 = new MockERC20("USDC", "USDC", 18);
+            token0 = new MockERC20("LST", "LST", 18);
+        }
+
         token0.mint(deployer, 1_000_000e18);
         token1.mint(deployer, 1_000_000e18);
 
@@ -79,6 +97,14 @@ contract DeployDemo is Script {
         HedgeReserve hedge = new HedgeReserve(deployer, IPoolManager(address(manager)), oracle);
         RewardDistributor rewards = new RewardDistributor(deployer);
 
+        uint256 maxDevBps = vm.envOr(
+            "MAX_SPOT_ORACLE_DEVIATION_BPS",
+            uint256(10_000)
+        );
+        if (maxDevBps == 0) maxDevBps = 10_000;
+        if (maxDevBps > type(uint16).max) maxDevBps = type(uint16).max;
+        hedge.setMaxSpotOracleDeviationBps(uint16(maxDevBps));
+
         uint160 requiredFlags = (uint160(1) << 10) | (uint160(1) << 8) | (uint160(1) << 7) | (uint160(1) << 6)
             | (uint160(1) << 2);
 
@@ -87,7 +113,7 @@ contract DeployDemo is Script {
             abi.encode(deployer, IPoolManager(address(manager)), oracle, safety, hedge, rewards)
         );
 
-        (bytes32 salt,) = HookMiner.findSalt(deployer, keccak256(initCode), requiredFlags, 200_000);
+        (bytes32 salt, ) = _findSalt(keccak256(initCode), requiredFlags, 200_000);
         GoldgardHook hook =
             new GoldgardHook{salt: salt}(deployer, IPoolManager(address(manager)), oracle, safety, hedge, rewards);
 
@@ -168,5 +194,46 @@ contract DeployDemo is Script {
         vm.writeJson(json, "../frontend/app/config/demoConfig.local.json");
 
         vm.stopBroadcast();
+    }
+
+    function _findSalt(
+        bytes32 initCodeHash,
+        uint160 requiredFlags,
+        uint256 maxAttempts
+    ) internal pure returns (bytes32 salt, address hookAddress) {
+        uint160 mask = uint160((1 << 14) - 1);
+        for (uint256 i = 0; i < maxAttempts; i++) {
+            salt = bytes32(i);
+            hookAddress = vm.computeCreate2Address(salt, initCodeHash);
+            if ((uint160(hookAddress) & mask) == requiredFlags)
+                return (salt, hookAddress);
+        }
+        revert HookMiner.HookAddressNotFound();
+    }
+
+    function _privateKeyOrZero() internal view returns (uint256 pk) {
+        string memory raw = vm.envOr("PRIVATE_KEY", string(""));
+        if (bytes(raw).length == 0) return 0;
+        string memory trimmed = _trimLeft(raw);
+        if (bytes(trimmed).length == 0) return 0;
+        return vm.parseUint(trimmed);
+    }
+
+    function _trimLeft(string memory s) internal pure returns (string memory) {
+        bytes memory b = bytes(s);
+        uint256 i = 0;
+        while (i < b.length) {
+            bytes1 c = b[i];
+            if (c != 0x20 && c != 0x09 && c != 0x0a && c != 0x0d) break;
+            unchecked {
+                i++;
+            }
+        }
+        if (i == 0) return s;
+        bytes memory out = new bytes(b.length - i);
+        for (uint256 j = 0; j < out.length; j++) {
+            out[j] = b[i + j];
+        }
+        return string(out);
     }
 }

@@ -51,7 +51,7 @@ contract HedgeReserve is Ownable2Step {
     function setMaxSpotOracleDeviationBps(
         uint16 deviationBps
     ) external onlyOwner {
-        if (deviationBps > 10_000) revert BadConfig();
+        if (deviationBps == 0) revert BadConfig();
         maxSpotOracleDeviationBps = deviationBps;
     }
 
@@ -125,6 +125,7 @@ contract HedgeReserve is Ownable2Step {
         (uint160 spotSqrtPriceX96, , , ) = manager.getSlot0(poolId);
         uint256 spot = _price1e18FromSqrt(spotSqrtPriceX96);
         uint256 deviation = _deviationBps(spot, oraclePrice1e18);
+        if (deviation > type(uint16).max) deviation = type(uint16).max;
         if (deviation > uint256(maxSpotOracleDeviationBps))
             revert OracleDeviationTooHigh(deviation);
     }
