@@ -1,0 +1,35 @@
+name: contracts
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  forge:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: goldgard-hookathon/contracts
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: nightly
+
+      - name: Forge version
+        run: forge --version
+
+      - name: Build
+        run: forge build
+
+      - name: Test
+        run: forge test
+
+      - name: Coverage (summary)
+        env:
+          FOUNDRY_INVARIANT_RUNS: "8"
+          FOUNDRY_INVARIANT_DEPTH: "32"
+          FOUNDRY_FUZZ_RUNS: "32"
+        run: forge coverage --report summary --ir-minimum --exclude-tests
+

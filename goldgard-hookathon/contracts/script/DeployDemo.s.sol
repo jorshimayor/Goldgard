@@ -76,10 +76,11 @@ contract DeployDemo is Script {
 
         OracleAdapter oracle = new OracleAdapter(deployer);
         SafetyModule safety = new SafetyModule(deployer, IERC20(address(token1)), "Goldgard Safety Vault", "gSAFE");
-        HedgeReserve hedge = new HedgeReserve(deployer, oracle);
+        HedgeReserve hedge = new HedgeReserve(deployer, IPoolManager(address(manager)), oracle);
         RewardDistributor rewards = new RewardDistributor(deployer);
 
-        uint160 requiredFlags = (uint160(1) << 10) | (uint160(1) << 7) | (uint160(1) << 6) | (uint160(1) << 2);
+        uint160 requiredFlags = (uint160(1) << 10) | (uint160(1) << 8) | (uint160(1) << 7) | (uint160(1) << 6)
+            | (uint160(1) << 2);
 
         bytes memory initCode = abi.encodePacked(
             type(GoldgardHook).creationCode,

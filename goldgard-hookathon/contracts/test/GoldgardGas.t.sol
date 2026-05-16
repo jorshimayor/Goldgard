@@ -72,10 +72,11 @@ contract GoldgardGasTest is Test {
             "Goldgard Safety Vault",
             "gSAFE"
         );
-        hedge = new HedgeReserve(address(this), oracle);
+        hedge = new HedgeReserve(address(this), IPoolManager(address(manager)), oracle);
         rewards = new RewardDistributor(address(this));
 
         uint160 requiredFlags = (uint160(1) << 10) |
+            (uint160(1) << 8) |
             (uint160(1) << 7) |
             (uint160(1) << 6) |
             (uint160(1) << 2);

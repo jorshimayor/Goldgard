@@ -7,6 +7,7 @@ import {IERC20} from "openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import {PoolManager} from "v4-core/PoolManager.sol";
 import {IPoolManager} from "v4-core/interfaces/IPoolManager.sol";
 import {PoolKey} from "v4-core/types/PoolKey.sol";
+import {PoolId} from "v4-core/types/PoolId.sol";
 import {Currency} from "v4-core/types/Currency.sol";
 import {IHooks} from "v4-core/interfaces/IHooks.sol";
 import {
@@ -73,10 +74,11 @@ contract GoldgardHookTest is Test {
             "Goldgard Safety Vault",
             "gSAFE"
         );
-        hedge = new HedgeReserve(address(this), oracle);
+        hedge = new HedgeReserve(address(this), IPoolManager(address(manager)), oracle);
         rewards = new RewardDistributor(address(this));
 
         uint160 requiredFlags = (uint160(1) << 10) |
+            (uint160(1) << 8) |
             (uint160(1) << 7) |
             (uint160(1) << 6) |
             (uint160(1) << 2);
@@ -184,6 +186,21 @@ contract GoldgardHookTest is Test {
         assertGt(afterAssets, beforeAssets);
     }
 
+    function testPremiumAccruesWhenFeeCurrencyIsToken0() public {
+        uint256 beforeAssets = safety.totalAssets();
+
+        SwapParams memory p = SwapParams({
+            zeroForOne: false,
+            amountSpecified: -1_000e18,
+            sqrtPriceLimitX96: TickMath.MAX_SQRT_PRICE - 1
+        });
+
+        swapRouter.swap(key, p);
+
+        uint256 afterAssets = safety.totalAssets();
+        assertGt(afterAssets, beforeAssets);
+    }
+
     function testCircuitBreakerTripsWhenOracleTooFar() public {
         agg.setAnswer(2e8);
 
@@ -201,5 +218,93 @@ contract GoldgardHookTest is Test {
         vm.warp(block.timestamp + 3 days);
         bool ok = hook.isEligible(address(this), key.toId());
         assertTrue(ok);
+    }
+
+    function testRemoveLiquidityDeletesPositionAndDisqualifies() public {
+        int24 lower = TickMath.minUsableTick(key.tickSpacing);
+        int24 upper = TickMath.maxUsableTick(key.tickSpacing);
+        bytes32 positionKey = keccak256(
+            abi.encode(key.toId(), address(this), lower, upper, bytes32(0))
+        );
+        (uint128 liquidityBefore, , , , , , , ) = hook.positions(positionKey);
+        assertGt(liquidityBefore, 0);
+
+        ModifyLiquidityParams memory rm = ModifyLiquidityParams({
+            tickLower: lower,
+            tickUpper: upper,
+            liquidityDelta: -10_000e18,
+            salt: bytes32(0)
+        });
+
+        liqRouter.modifyLiquidity(key, rm, abi.encodePacked(address(this)));
+
+        (uint128 liquidityAfter, , , , , , , ) = hook.positions(positionKey);
+        assertEq(liquidityAfter, 0);
+        assertFalse(hook.isEligible(address(this), key.toId()));
+    }
+
+    function testRebalanceSkipsPremiumAccountingAndClearsPending() public {
+        SwapParams memory p = SwapParams({
+            zeroForOne: true,
+            amountSpecified: -1_000e18,
+            sqrtPriceLimitX96: TickMath.MIN_SQRT_PRICE + 1
+        });
+        swapRouter.swap(key, p);
+
+        PoolId poolId = key.toId();
+        uint256 pending0 = hook.pendingToken0In(poolId);
+        uint256 pending1 = hook.pendingToken1In(poolId);
+        require(pending0 > 0 || pending1 > 0);
+
+        uint256 safetyBefore = safety.totalAssets();
+        if (pending0 > 0) {
+            hook.rebalance(key, true, pending0);
+            assertEq(hook.pendingToken0In(poolId), 0);
+        } else {
+            hook.rebalance(key, false, pending1);
+            assertEq(hook.pendingToken1In(poolId), 0);
+        }
+        uint256 safetyAfter = safety.totalAssets();
+        assertEq(safetyAfter, safetyBefore);
+        assertEq(token0.balanceOf(address(hook)), 0);
+        assertEq(token1.balanceOf(address(hook)), 0);
+    }
+
+    function testRebalanceSupportsPartialConsumption() public {
+        SwapParams memory p = SwapParams({
+            zeroForOne: true,
+            amountSpecified: -1_000e18,
+            sqrtPriceLimitX96: TickMath.MIN_SQRT_PRICE + 1
+        });
+        swapRouter.swap(key, p);
+
+        PoolId poolId = key.toId();
+        uint256 pending0 = hook.pendingToken0In(poolId);
+        uint256 pending1 = hook.pendingToken1In(poolId);
+        require(pending0 > 1 || pending1 > 1);
+
+        uint256 safetyBefore = safety.totalAssets();
+        if (pending0 > 1) {
+            uint256 half = pending0 / 2;
+            hook.rebalance(key, true, half);
+            assertEq(safety.totalAssets(), safetyBefore);
+            assertEq(hook.pendingToken0In(poolId), pending0 - half);
+        } else {
+            uint256 half = pending1 / 2;
+            hook.rebalance(key, false, half);
+            assertEq(safety.totalAssets(), safetyBefore);
+            assertEq(hook.pendingToken1In(poolId), pending1 - half);
+        }
+    }
+
+    function testUnlockCallbackOnlyPoolManager() public {
+        vm.expectRevert();
+        hook.unlockCallback(new bytes(0));
+    }
+
+    function testPreviewClaimRevertsWhenChainlinkStale() public {
+        vm.warp(block.timestamp + 4000);
+        vm.expectRevert(OracleAdapter.OracleUnavailable.selector);
+        hook.previewClaim(address(this), key.toId());
     }
 }

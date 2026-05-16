@@ -6,6 +6,9 @@ import {
     Ownable2Step
 } from "openzeppelin-contracts/contracts/access/Ownable2Step.sol";
 import {Math} from "openzeppelin-contracts/contracts/utils/math/Math.sol";
+import {
+    SafeCast
+} from "openzeppelin-contracts/contracts/utils/math/SafeCast.sol";
 
 import {PoolKey} from "v4-core/types/PoolKey.sol";
 import {PoolId, PoolIdLibrary} from "v4-core/types/PoolId.sol";
@@ -20,6 +23,10 @@ contract OracleAdapter is Ownable2Step {
 
     error OnlyHook();
     error BadConfig();
+    error OracleUnavailable();
+
+    uint8 internal constant OBSERVATION_CARDINALITY = 32;
+    uint32 public constant MIN_TWAP_WINDOW_SECONDS = 10 minutes;
 
     struct PoolOracleConfig {
         IChainlinkAggregatorV3 aggregator;
@@ -30,15 +37,24 @@ contract OracleAdapter is Ownable2Step {
     }
 
     struct Observation {
-        uint64 lastUpdated;
-        uint160 lastSqrtPriceX96;
+        uint64 timestamp;
         uint256 sqrtPriceX96Cumulative;
     }
 
     address public hook;
 
     mapping(PoolId => PoolOracleConfig) public poolOracle;
-    mapping(PoolId => Observation) public observations;
+    mapping(PoolId => Observation[OBSERVATION_CARDINALITY]) internal observations;
+
+    struct PoolState {
+        uint64 lastUpdated;
+        uint160 lastSqrtPriceX96;
+        uint256 sqrtPriceX96Cumulative;
+        uint8 index;
+        uint8 cardinality;
+    }
+
+    mapping(PoolId => PoolState) public poolState;
 
     constructor(address _owner) Ownable(_owner) {}
 
@@ -51,6 +67,9 @@ contract OracleAdapter is Ownable2Step {
         PoolOracleConfig calldata cfg
     ) external onlyOwner {
         if (cfg.maxStaleSeconds == 0) revert BadConfig();
+        if (cfg.aggregatorDecimals > 30) revert BadConfig();
+        if (cfg.token0Decimals > 30) revert BadConfig();
+        if (cfg.token1Decimals > 30) revert BadConfig();
         poolOracle[key.toId()] = PoolOracleConfig({
             aggregator: cfg.aggregator,
             maxStaleSeconds: cfg.maxStaleSeconds,
@@ -69,26 +88,40 @@ contract OracleAdapter is Ownable2Step {
         PoolId poolId = key.toId();
         (uint160 sqrtPriceX96, , , ) = manager.getSlot0(poolId);
 
-        Observation storage obs = observations[poolId];
-
         uint64 t = uint64(block.timestamp);
-        if (obs.lastUpdated == 0) {
-            obs.lastUpdated = t;
-            obs.lastSqrtPriceX96 = sqrtPriceX96;
+        PoolState storage st = poolState[poolId];
+        if (st.lastUpdated == 0) {
+            st.lastUpdated = t;
+            st.lastSqrtPriceX96 = sqrtPriceX96;
+            st.sqrtPriceX96Cumulative = 0;
+
+            observations[poolId][0] = Observation({
+                timestamp: t,
+                sqrtPriceX96Cumulative: 0
+            });
+            st.index = 1;
+            st.cardinality = 1;
             return;
         }
 
-        uint64 dt = t - obs.lastUpdated;
-        if (dt == 0) {
-            obs.lastSqrtPriceX96 = sqrtPriceX96;
-            return;
-        }
+        uint64 dt = t - st.lastUpdated;
+        if (dt == 0) return;
 
-        obs.sqrtPriceX96Cumulative +=
-            uint256(obs.lastSqrtPriceX96) *
-            uint256(dt);
-        obs.lastUpdated = t;
-        obs.lastSqrtPriceX96 = sqrtPriceX96;
+        st.sqrtPriceX96Cumulative += uint256(st.lastSqrtPriceX96) * uint256(dt);
+        st.lastUpdated = t;
+        st.lastSqrtPriceX96 = sqrtPriceX96;
+
+        uint8 i = st.index;
+        observations[poolId][i] = Observation({
+            timestamp: t,
+            sqrtPriceX96Cumulative: st.sqrtPriceX96Cumulative
+        });
+        unchecked {
+            i++;
+        }
+        if (i == OBSERVATION_CARDINALITY) i = 0;
+        st.index = i;
+        if (st.cardinality < OBSERVATION_CARDINALITY) st.cardinality++;
     }
 
     function getTwapSqrtPriceX96(
@@ -96,24 +129,36 @@ contract OracleAdapter is Ownable2Step {
         uint32 windowSeconds
     ) external view returns (uint160) {
         PoolId poolId = key.toId();
-        Observation memory obs = observations[poolId];
-        if (obs.lastUpdated == 0) return 0;
+        PoolState memory st = poolState[poolId];
+        if (st.lastUpdated == 0) return 0;
 
         uint64 t = uint64(block.timestamp);
-        uint64 dt = t - obs.lastUpdated;
-        uint256 cumulative = obs.sqrtPriceX96Cumulative +
-            uint256(obs.lastSqrtPriceX96) *
-            uint256(dt);
+        if (t <= st.lastUpdated) return st.lastSqrtPriceX96;
 
-        uint64 effectiveWindow = windowSeconds;
+        uint64 dtNow = t - st.lastUpdated;
+        uint256 cumulativeNow = st.sqrtPriceX96Cumulative +
+            uint256(st.lastSqrtPriceX96) *
+            uint256(dtNow);
+
+        uint32 effectiveWindow = windowSeconds;
         if (effectiveWindow == 0) effectiveWindow = 1;
-        if (dt < effectiveWindow) {
-            return obs.lastSqrtPriceX96;
-        }
+        if (effectiveWindow < MIN_TWAP_WINDOW_SECONDS)
+            effectiveWindow = MIN_TWAP_WINDOW_SECONDS;
 
-        uint256 avg = cumulative / uint256(dt);
+        uint64 target = t > effectiveWindow ? t - uint64(effectiveWindow) : 0;
+        (uint64 obsTs, uint256 obsCumulative) = _getObservationAtOrBefore(
+            poolId,
+            target,
+            st.index,
+            st.cardinality
+        );
+
+        uint64 dt = t - obsTs;
+        if (dt == 0) return st.lastSqrtPriceX96;
+
+        uint256 avg = (cumulativeNow - obsCumulative) / uint256(dt);
         if (avg > type(uint160).max) avg = type(uint160).max;
-        return uint160(avg);
+        return SafeCast.toUint160(avg);
     }
 
     function getChainlinkSqrtPriceX96(
@@ -126,28 +171,47 @@ contract OracleAdapter is Ownable2Step {
             .aggregator
             .latestRoundData();
         if (answer <= 0) return (0, false);
-        if (block.timestamp - updatedAt > cfg.maxStaleSeconds)
+        if (updatedAt == 0 || updatedAt > block.timestamp) return (0, false);
+        if (block.timestamp > updatedAt + uint256(cfg.maxStaleSeconds))
             return (0, false);
 
         uint256 price1e18 = _scaleTo1e18(
-            uint256(answer),
+            SafeCast.toUint256(answer),
             cfg.aggregatorDecimals
         );
 
-        if (cfg.token0Decimals > 18)
-            price1e18 = price1e18 / (10 ** (cfg.token0Decimals - 18));
-        else if (cfg.token0Decimals < 18)
-            price1e18 = price1e18 * (10 ** (18 - cfg.token0Decimals));
+        if (cfg.token0Decimals > 18) {
+            price1e18 = Math.mulDiv(
+                price1e18,
+                1,
+                _pow10(cfg.token0Decimals - 18)
+            );
+        } else if (cfg.token0Decimals < 18) {
+            price1e18 = Math.mulDiv(
+                price1e18,
+                _pow10(18 - cfg.token0Decimals),
+                1
+            );
+        }
 
-        if (cfg.token1Decimals > 18)
-            price1e18 = price1e18 * (10 ** (cfg.token1Decimals - 18));
-        else if (cfg.token1Decimals < 18)
-            price1e18 = price1e18 / (10 ** (18 - cfg.token1Decimals));
+        if (cfg.token1Decimals > 18) {
+            price1e18 = Math.mulDiv(
+                price1e18,
+                _pow10(cfg.token1Decimals - 18),
+                1
+            );
+        } else if (cfg.token1Decimals < 18) {
+            price1e18 = Math.mulDiv(
+                price1e18,
+                1,
+                _pow10(18 - cfg.token1Decimals)
+            );
+        }
 
         uint256 ratioX192 = Math.mulDiv(price1e18, uint256(1) << 192, 1e18);
         uint256 sqrtRatioX96 = Math.sqrt(ratioX192);
         if (sqrtRatioX96 > type(uint160).max) sqrtRatioX96 = type(uint160).max;
-        return (uint160(sqrtRatioX96), true);
+        return (SafeCast.toUint160(sqrtRatioX96), true);
     }
 
     function getPrice1e18(
@@ -159,12 +223,25 @@ contract OracleAdapter is Ownable2Step {
             ? cl
             : this.getTwapSqrtPriceX96(key, twapWindowSeconds);
         if (sqrtPriceX96 == 0) return 0;
-        return
-            Math.mulDiv(
-                uint256(sqrtPriceX96) * uint256(sqrtPriceX96),
-                1e18,
-                uint256(1) << 192
-            );
+        uint256 price = Math.mulDiv(
+            uint256(sqrtPriceX96),
+            uint256(sqrtPriceX96),
+            uint256(1) << 192
+        );
+        return Math.mulDiv(price, 1e18, 1);
+    }
+
+    function getPrice1e18Strict(
+        PoolKey calldata key
+    ) external view returns (uint256 price1e18) {
+        (uint160 cl, bool ok) = this.getChainlinkSqrtPriceX96(key);
+        if (!ok || cl == 0) revert OracleUnavailable();
+        uint256 price = Math.mulDiv(
+            uint256(cl),
+            uint256(cl),
+            uint256(1) << 192
+        );
+        return Math.mulDiv(price, 1e18, 1);
     }
 
     function _scaleTo1e18(
@@ -172,7 +249,53 @@ contract OracleAdapter is Ownable2Step {
         uint8 decimals
     ) internal pure returns (uint256) {
         if (decimals == 18) return value;
-        if (decimals > 18) return value / (10 ** (decimals - 18));
-        return value * (10 ** (18 - decimals));
+        if (decimals > 18)
+            return Math.mulDiv(value, 1, _pow10(decimals - 18));
+        return Math.mulDiv(value, _pow10(18 - decimals), 1);
+    }
+
+    function _pow10(uint8 exp) internal pure returns (uint256 r) {
+        r = 1;
+        for (uint256 i = 0; i < exp; i++) {
+            r *= 10;
+            if (r == 0) revert BadConfig();
+        }
+    }
+
+    function _getObservationAtOrBefore(
+        PoolId poolId,
+        uint64 target,
+        uint8 index,
+        uint8 cardinality
+    ) internal view returns (uint64 ts, uint256 cumulative) {
+        Observation memory oldest = observations[poolId][index];
+        if (oldest.timestamp != 0) {
+            ts = oldest.timestamp;
+            cumulative = oldest.sqrtPriceX96Cumulative;
+        } else {
+            uint8 oldestIndex = index;
+            if (cardinality == OBSERVATION_CARDINALITY) {
+                oldestIndex = index;
+            } else {
+                oldestIndex = 0;
+            }
+            Observation memory o = observations[poolId][oldestIndex];
+            ts = o.timestamp;
+            cumulative = o.sqrtPriceX96Cumulative;
+        }
+
+        for (uint256 k = 0; k < cardinality; k++) {
+            uint8 j = index;
+            if (j == 0) j = OBSERVATION_CARDINALITY;
+            unchecked {
+                j--;
+            }
+            Observation memory o = observations[poolId][j];
+            if (o.timestamp == 0) break;
+            if (o.timestamp <= target) return (o.timestamp, o.sqrtPriceX96Cumulative);
+            index = j;
+            ts = o.timestamp;
+            cumulative = o.sqrtPriceX96Cumulative;
+        }
     }
 }

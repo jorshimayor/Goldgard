@@ -11,6 +11,9 @@ import {
     SafeERC20
 } from "openzeppelin-contracts/contracts/token/ERC20/utils/SafeERC20.sol";
 import {SafeCast} from "v4-core/libraries/SafeCast.sol";
+import {
+    SafeCast as OZSafeCast
+} from "openzeppelin-contracts/contracts/utils/math/SafeCast.sol";
 
 import {Hooks} from "v4-core/libraries/Hooks.sol";
 import {IHooks} from "v4-core/interfaces/IHooks.sol";
@@ -27,6 +30,7 @@ import {
 } from "v4-core/types/BeforeSwapDelta.sol";
 import {Currency} from "v4-core/types/Currency.sol";
 import {IPoolManager} from "v4-core/interfaces/IPoolManager.sol";
+import {IUnlockCallback} from "v4-core/interfaces/callback/IUnlockCallback.sol";
 import {
     ModifyLiquidityParams,
     SwapParams
@@ -42,7 +46,7 @@ import {SafetyModule} from "./SafetyModule.sol";
 import {HedgeReserve} from "./HedgeReserve.sol";
 import {RewardDistributor} from "./RewardDistributor.sol";
 
-contract GoldgardHook is BaseHook, Ownable2Step {
+contract GoldgardHook is BaseHook, Ownable2Step, IUnlockCallback {
     using Hooks for IHooks;
     using PoolIdLibrary for PoolKey;
     using BalanceDeltaLibrary for BalanceDelta;
@@ -74,6 +78,12 @@ contract GoldgardHook is BaseHook, Ownable2Step {
         int256 poolDelta1,
         uint256 amountMoved
     );
+    event RebalanceExecuted(
+        PoolId indexed poolId,
+        bool zeroForOne,
+        uint256 amountIn,
+        uint256 amountOut
+    );
     event LiquidityEnrolled(
         PoolId indexed poolId,
         bytes32 indexed positionKey,
@@ -84,7 +94,6 @@ contract GoldgardHook is BaseHook, Ownable2Step {
     uint256 public constant BPS = 10_000;
     uint256 public constant PREMIUM_BPS = 2;
 
-    bytes32 internal constant TS_LAST_TICK = keccak256("GGARD/lastTick");
     bytes32 internal constant TS_REBALANCE_IN_PROGRESS =
         keccak256("GGARD/rebalance/inProgress");
     bytes32 internal constant TS_REBALANCE_AMOUNT_IN =
@@ -123,6 +132,8 @@ contract GoldgardHook is BaseHook, Ownable2Step {
     mapping(PoolId => PoolConfig) public poolConfig;
     mapping(PoolId => PoolKey) public poolKeys;
     mapping(bytes32 => PositionInfo) public positions;
+    mapping(PoolId => uint256) public pendingToken0In;
+    mapping(PoolId => uint256) public pendingToken1In;
 
     constructor(
         address _owner,
@@ -139,10 +150,12 @@ contract GoldgardHook is BaseHook, Ownable2Step {
 
         Hooks.Permissions memory perms;
         perms.afterAddLiquidity = true;
+        perms.afterRemoveLiquidity = true;
         perms.beforeSwap = true;
         perms.afterSwap = true;
         perms.afterSwapReturnDelta = true;
         perms.afterAddLiquidityReturnDelta = false;
+        perms.afterRemoveLiquidityReturnDelta = false;
         Hooks.validateHookPermissions(this, perms);
     }
 
@@ -174,7 +187,7 @@ contract GoldgardHook is BaseHook, Ownable2Step {
 
         oracle.updateFromPool(manager, key);
 
-        (uint160 spotSqrtPriceX96, int24 tick, , ) = manager.getSlot0(poolId);
+        (uint160 spotSqrtPriceX96, , , ) = manager.getSlot0(poolId);
         (uint160 oracleSqrtPriceX96, bool ok) = oracle.getChainlinkSqrtPriceX96(
             key
         );
@@ -206,13 +219,8 @@ contract GoldgardHook is BaseHook, Ownable2Step {
                 uint256(cfg.feeSlopeBps);
             uint256 candidate = uint256(cfg.baseLpFee) + extra;
             if (candidate > cfg.maxLpFee) candidate = cfg.maxLpFee;
-            dynFee = uint24(candidate);
+            dynFee = OZSafeCast.toUint24(candidate);
         }
-
-        Transient.tstoreU256(
-            TS_LAST_TICK,
-            uint256(uint24(uint32(int32(tick))))
-        );
 
         uint24 overrideFee = dynFee | LPFeeLibrary.OVERRIDE_FEE_FLAG;
         return (
@@ -229,6 +237,9 @@ contract GoldgardHook is BaseHook, Ownable2Step {
         BalanceDelta delta,
         bytes calldata
     ) external override onlyPoolManager returns (bytes4, int128) {
+        if (Transient.tloadU256(TS_REBALANCE_IN_PROGRESS) == 1)
+            return (GoldgardHook.afterSwap.selector, 0);
+
         PoolId poolId = key.toId();
         PoolConfig memory cfg = poolConfig[poolId];
 
@@ -239,7 +250,8 @@ contract GoldgardHook is BaseHook, Ownable2Step {
             : (key.currency0, delta.amount0());
 
         if (swapAmount < 0) swapAmount = -swapAmount;
-        uint256 premium = (uint256(uint128(swapAmount)) * PREMIUM_BPS) / BPS;
+        uint256 swapAmountAbs = OZSafeCast.toUint256(int256(swapAmount));
+        uint256 premium = (swapAmountAbs * PREMIUM_BPS) / BPS;
         if (premium == 0) return (GoldgardHook.afterSwap.selector, 0);
 
         manager.take(feeCurrency, address(this), premium);
@@ -270,7 +282,20 @@ contract GoldgardHook is BaseHook, Ownable2Step {
             usdcDeposited = converted;
         }
 
-        _rebalance(poolId, key, cfg, delta);
+        if (cfg.rebalanceBps != 0) {
+            int256 poolDelta0 = -int256(delta.amount0());
+            int256 poolDelta1 = -int256(delta.amount1());
+
+            if (poolDelta0 > 0) {
+                uint256 amount0In =
+                    (OZSafeCast.toUint256(poolDelta0) * cfg.rebalanceBps) / BPS;
+                pendingToken0In[poolId] += amount0In;
+            } else if (poolDelta1 > 0) {
+                uint256 amount1In =
+                    (OZSafeCast.toUint256(poolDelta1) * cfg.rebalanceBps) / BPS;
+                pendingToken1In[poolId] += amount1In;
+            }
+        }
 
         uint256 reward = usdcDeposited / 100;
         if (reward > 0) rewards.mintReward(sender, reward);
@@ -308,7 +333,7 @@ contract GoldgardHook is BaseHook, Ownable2Step {
 
         PositionInfo storage p = positions[positionKey];
 
-        (uint160 spotSqrtPriceX96, int24 tick, , ) = manager.getSlot0(poolId);
+        (, int24 tick, , ) = manager.getSlot0(poolId);
 
         _updatePositionAccrual(p, tick);
         p.tickLower = params.tickLower;
@@ -318,25 +343,86 @@ contract GoldgardHook is BaseHook, Ownable2Step {
         p.liquidity += added;
 
         uint256 amount0 = delta.amount0() < 0
-            ? uint256(uint128(-delta.amount0()))
+            ? OZSafeCast.toUint256(int256(-delta.amount0()))
             : 0;
         uint256 amount1 = delta.amount1() < 0
-            ? uint256(uint128(-delta.amount1()))
+            ? OZSafeCast.toUint256(int256(-delta.amount1()))
             : 0;
 
-        if (p.enrolledSqrtPriceX96 == 0) {
-            p.enrolledSqrtPriceX96 = spotSqrtPriceX96;
-            uint256 price1e18 = oracle.getPrice1e18(
-                key,
-                poolConfig[poolId].twapWindowSeconds
-            );
-            uint256 token0ValueIn1 = Math.mulDiv(amount0, price1e18, 1e18);
-            p.principalToken1 = amount1 + token0ValueIn1;
+        uint256 price1e18 = oracle.getPrice1e18Strict(key);
+        uint256 token0ValueIn1 = Math.mulDiv(amount0, price1e18, 1e18);
+        uint256 principalAdded = amount1 + token0ValueIn1;
 
+        if (p.enrolledSqrtPriceX96 == 0) {
+            (uint160 clSqrtPriceX96, bool ok) = oracle.getChainlinkSqrtPriceX96(
+                key
+            );
+            if (!ok || clSqrtPriceX96 == 0) revert OracleUnavailable();
+            p.enrolledSqrtPriceX96 = clSqrtPriceX96;
             emit LiquidityEnrolled(poolId, positionKey, owner, p.liquidity);
         }
+        p.principalToken1 += principalAdded;
 
         return (GoldgardHook.afterAddLiquidity.selector, toBalanceDelta(0, 0));
+    }
+
+    function afterRemoveLiquidity(
+        address sender,
+        PoolKey calldata key,
+        ModifyLiquidityParams calldata params,
+        BalanceDelta,
+        BalanceDelta,
+        bytes calldata hookData
+    ) external override onlyPoolManager returns (bytes4, BalanceDelta) {
+        if (params.liquidityDelta >= 0) {
+            return (
+                GoldgardHook.afterRemoveLiquidity.selector,
+                toBalanceDelta(0, 0)
+            );
+        }
+
+        address owner = _resolveOwner(sender, hookData);
+        PoolId poolId = key.toId();
+        bytes32 positionKey = keccak256(
+            abi.encode(
+                poolId,
+                owner,
+                params.tickLower,
+                params.tickUpper,
+                params.salt
+            )
+        );
+
+        PositionInfo storage p = positions[positionKey];
+        if (p.liquidity == 0) {
+            return (
+                GoldgardHook.afterRemoveLiquidity.selector,
+                toBalanceDelta(0, 0)
+            );
+        }
+
+        (, int24 tick, , ) = manager.getSlot0(poolId);
+        _updatePositionAccrual(p, tick);
+
+        uint128 removed = uint256(-params.liquidityDelta).toUint128();
+        if (removed > p.liquidity) removed = p.liquidity;
+
+        uint128 prevLiquidity = p.liquidity;
+        p.liquidity = prevLiquidity - removed;
+
+        if (p.principalToken1 != 0) {
+            p.principalToken1 = Math.mulDiv(
+                p.principalToken1,
+                uint256(p.liquidity),
+                uint256(prevLiquidity)
+            );
+        }
+
+        if (p.liquidity == 0) {
+            delete positions[positionKey];
+        }
+
+        return (GoldgardHook.afterRemoveLiquidity.selector, toBalanceDelta(0, 0));
     }
 
     function isEligible(
@@ -371,15 +457,16 @@ contract GoldgardHook is BaseHook, Ownable2Step {
         if (p.enrolledSqrtPriceX96 == 0 || p.principalToken1 == 0) return 0;
 
         uint256 p0 = Math.mulDiv(
-            uint256(p.enrolledSqrtPriceX96) * uint256(p.enrolledSqrtPriceX96),
+            Math.mulDiv(
+                uint256(p.enrolledSqrtPriceX96),
+                uint256(p.enrolledSqrtPriceX96),
+                uint256(1) << 192
+            ),
             1e18,
-            uint256(1) << 192
+            1
         );
         PoolKey memory key = poolKeys[poolId];
-        uint256 current = oracle.getPrice1e18(
-            key,
-            poolConfig[poolId].twapWindowSeconds
-        );
+        uint256 current = oracle.getPrice1e18Strict(key);
         if (current == 0 || p0 == 0) return 0;
         uint256 r = Math.mulDiv(current, 1e18, p0);
 
@@ -392,48 +479,64 @@ contract GoldgardHook is BaseHook, Ownable2Step {
         if (payoutAssets > available) payoutAssets = available;
     }
 
-    function _rebalance(
-        PoolId poolId,
-        PoolKey calldata key,
-        PoolConfig memory cfg,
-        BalanceDelta swapperDelta
-    ) internal {
-        if (cfg.rebalanceBps == 0) return;
-
-        int256 poolDelta0 = -int256(swapperDelta.amount0());
-        int256 poolDelta1 = -int256(swapperDelta.amount1());
-
-        uint256 amountMoved;
-        if (poolDelta0 > 0) {
-            uint256 amount0In = (uint256(poolDelta0) * cfg.rebalanceBps) / BPS;
-            if (amount0In > 0) {
-                hedgeReserve.fundHook(key.currency0, amount0In, address(this));
-                amountMoved = _rebalanceSwap(key, true, amount0In);
-            }
-        } else if (poolDelta1 > 0) {
-            uint256 amount1In = (uint256(poolDelta1) * cfg.rebalanceBps) / BPS;
-            if (amount1In > 0) {
-                hedgeReserve.fundHook(key.currency1, amount1In, address(this));
-                amountMoved = _rebalanceSwap(key, false, amount1In);
-            }
-        }
-
-        if (amountMoved > 0)
-            emit Rebalanced(poolId, poolDelta0, poolDelta1, amountMoved);
-    }
-
-    function _rebalanceSwap(
+    function rebalance(
         PoolKey calldata key,
         bool zeroForOne,
-        uint256 amountIn
-    ) internal returns (uint256 amountOut) {
+        uint256 maxAmountIn
+    ) external returns (uint256 amountOut) {
+        PoolId poolId = key.toId();
+        PoolConfig memory cfg = poolConfig[poolId];
+        if (cfg.rebalanceBps == 0) return 0;
+
+        uint256 pending = zeroForOne
+            ? pendingToken0In[poolId]
+            : pendingToken1In[poolId];
+        uint256 amountIn = pending;
+        if (maxAmountIn != 0 && amountIn > maxAmountIn) amountIn = maxAmountIn;
+        if (amountIn == 0) return 0;
+
+        bytes memory ret = manager.unlock(abi.encode(key, zeroForOne, amountIn));
+        amountOut = abi.decode(ret, (uint256));
+
+        if (zeroForOne) pendingToken0In[poolId] -= amountIn;
+        else pendingToken1In[poolId] -= amountIn;
+
+        emit RebalanceExecuted(poolId, zeroForOne, amountIn, amountOut);
+    }
+
+    function unlockCallback(
+        bytes calldata data
+    ) external override onlyPoolManager returns (bytes memory) {
+        (PoolKey memory key, bool zeroForOne, uint256 amountIn) = abi.decode(
+            data,
+            (PoolKey, bool, uint256)
+        );
+
         Transient.tstoreU256(TS_REBALANCE_IN_PROGRESS, 1);
         Transient.tstoreU256(TS_REBALANCE_AMOUNT_IN, amountIn);
         Transient.tstoreU256(TS_REBALANCE_AMOUNT_OUT, 0);
 
+        hedgeReserve.fundHook(
+            zeroForOne ? key.currency0 : key.currency1,
+            amountIn,
+            address(this)
+        );
+        uint256 amountOut = _rebalanceSwap(key, zeroForOne, amountIn);
+
+        Transient.tstoreU256(TS_REBALANCE_AMOUNT_OUT, amountOut);
+        Transient.tstoreU256(TS_REBALANCE_IN_PROGRESS, 0);
+
+        return abi.encode(amountOut);
+    }
+
+    function _rebalanceSwap(
+        PoolKey memory key,
+        bool zeroForOne,
+        uint256 amountIn
+    ) internal returns (uint256 amountOut) {
         SwapParams memory p = SwapParams({
             zeroForOne: zeroForOne,
-            amountSpecified: -int256(amountIn),
+            amountSpecified: -amountIn.toInt256(),
             sqrtPriceLimitX96: zeroForOne
                 ? TickMath.MIN_SQRT_PRICE + 1
                 : TickMath.MAX_SQRT_PRICE - 1
@@ -442,8 +545,8 @@ contract GoldgardHook is BaseHook, Ownable2Step {
         BalanceDelta d = manager.swap(key, p, new bytes(0));
 
         if (zeroForOne) {
-            uint256 in0 = uint256(int256(-d.amount0()));
-            amountOut = uint256(int256(d.amount1()));
+            uint256 in0 = OZSafeCast.toUint256(int256(-d.amount0()));
+            amountOut = OZSafeCast.toUint256(int256(d.amount1()));
 
             manager.sync(key.currency0);
             IERC20(Currency.unwrap(key.currency0)).safeTransfer(
@@ -458,8 +561,8 @@ contract GoldgardHook is BaseHook, Ownable2Step {
                 amountOut
             );
         } else {
-            uint256 in1 = uint256(int256(-d.amount1()));
-            amountOut = uint256(int256(d.amount0()));
+            uint256 in1 = OZSafeCast.toUint256(int256(-d.amount1()));
+            amountOut = OZSafeCast.toUint256(int256(d.amount0()));
 
             manager.sync(key.currency1);
             IERC20(Currency.unwrap(key.currency1)).safeTransfer(
@@ -474,9 +577,6 @@ contract GoldgardHook is BaseHook, Ownable2Step {
                 amountOut
             );
         }
-
-        Transient.tstoreU256(TS_REBALANCE_AMOUNT_OUT, amountOut);
-        Transient.tstoreU256(TS_REBALANCE_IN_PROGRESS, 0);
     }
 
     function _resolveOwner(
