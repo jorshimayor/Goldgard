@@ -4,6 +4,8 @@ import Link from "next/link";
 import { ConnectButton } from "@rainbow-me/rainbowkit";
 import { Shield, Menu, X } from "lucide-react";
 import { useState } from "react";
+import { useChainId } from "wagmi";
+import { getDemoConfigForChain } from "../lib/demoConfig";
 
 const links = [
   { href: "/", label: "Landing" },
@@ -13,6 +15,9 @@ const links = [
 
 export function Nav() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const chainId = useChainId();
+  const cfg = getDemoConfigForChain(chainId);
+  const netLabel = cfg.chainId === 11155111 ? "Sepolia" : cfg.chainId === 31337 ? "Local" : `Chain ${cfg.chainId}`;
 
   return (
     <header className="sticky top-0 z-50 border-b border-gg-border bg-gradient-to-b from-[#0A1428]/95 to-[#0A1428]/70 backdrop-blur-xl transition-all duration-300">
@@ -49,11 +54,9 @@ export function Nav() {
         {/* Right Section */}
         <div className="flex items-center gap-3 sm:gap-4">
           <span className="hidden rounded-full border border-gg-gold/30 bg-gg-surface/50 px-3 py-1.5 text-xs font-semibold text-gg-gold sm:inline backdrop-blur-sm">
-            Sepolia
+            {netLabel}
           </span>
-          <div className="hidden sm:block">
-            <ConnectButton showBalance={false} />
-          </div>
+          <ConnectButton showBalance={false} />
           
           {/* Mobile Menu Button */}
           <button
@@ -92,4 +95,3 @@ export function Nav() {
     </header>
   );
 }
-

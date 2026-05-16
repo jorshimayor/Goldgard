@@ -2,12 +2,14 @@
 
 import { useParams } from "next/navigation";
 import { useMemo } from "react";
-import { getDemoConfig } from "../../../lib/demoConfig";
+import { useChainId } from "wagmi";
+import { getDemoConfigForChain } from "../../../lib/demoConfig";
 import { shortAddr } from "../../../lib/format";
 
 export default function PoolDetailPage() {
   const params = useParams<{ address: string }>();
-  const cfg = useMemo(() => getDemoConfig(), []);
+  const chainId = useChainId();
+  const cfg = useMemo(() => getDemoConfigForChain(chainId), [chainId]);
 
   return (
     <div className="mx-auto w-full max-w-6xl px-4 py-10">
@@ -42,4 +44,3 @@ export default function PoolDetailPage() {
     </div>
   );
 }
-

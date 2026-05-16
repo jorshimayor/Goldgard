@@ -8,21 +8,25 @@ const execFileAsync = promisify(execFile);
 
 export async function POST(request: Request) {
   const body = (await request.json().catch(() => ({}))) as {
+    chainId?: number;
     directionUp?: boolean;
     moveBps?: number;
     steps?: number;
     amountPerStep?: string;
   };
 
-  const rpcUrl = process.env.DEMO_RPC_URL;
-  const privateKey = process.env.DEMO_PRIVATE_KEY;
+  const chainId = body.chainId;
+
+  const isSepolia = chainId === 11155111;
+  const rpcUrl = isSepolia ? process.env.SEPOLIA_RPC_URL : process.env.DEMO_RPC_URL;
+  const privateKey = isSepolia ? process.env.SEPOLIA_PRIVATE_KEY : process.env.DEMO_PRIVATE_KEY;
 
   if (!rpcUrl || !privateKey) {
     return NextResponse.json(
       {
         ok: false,
         error:
-          "Missing DEMO_RPC_URL or DEMO_PRIVATE_KEY. This endpoint is meant for local demos (Anvil/Sepolia) run from your machine.",
+          "Missing DEMO_RPC_URL/DEMO_PRIVATE_KEY (local) or SEPOLIA_RPC_URL/SEPOLIA_PRIVATE_KEY (sepolia). This endpoint is meant for demos run from your machine.",
       },
       { status: 400 },
     );

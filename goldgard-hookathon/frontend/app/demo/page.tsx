@@ -5,15 +5,15 @@ import { useAccount, useChainId, usePublicClient, useWriteContract } from "wagmi
 import { parseUnits } from "viem";
 import { ArrowRight, CheckCircle2, CircleDashed, ExternalLink, Flame, Shield } from "lucide-react";
 
-import { getDemoConfig, isConfiguredAddress } from "../../lib/demoConfig";
+import { getDemoConfigForChain, isConfiguredAddress } from "../../lib/demoConfig";
 import { mockErc20Abi } from "../../lib/abi/mockErc20";
 import { swapRouterNoChecksAbi } from "../../lib/abi/swapRouterNoChecks";
 
 type Step = "trade" | "prep" | "execute" | "review";
 
 export default function DemoConsolePage() {
-  const cfg = useMemo(() => getDemoConfig(), []);
   const chainId = useChainId();
+  const cfg = useMemo(() => getDemoConfigForChain(chainId), [chainId]);
   const { address } = useAccount();
   const client = usePublicClient();
   const { writeContractAsync } = useWriteContract();
@@ -45,12 +45,26 @@ export default function DemoConsolePage() {
     setBusy(true);
     setError(null);
     try {
-      await writeContractAsync({
-        abi: mockErc20Abi,
-        address: (dir === "0to1" ? cfg.token0 : cfg.token1) as `0x${string}`,
-        functionName: "mint",
-        args: [address, amountWei],
-      });
+      if (cfg.chainId === 31337) {
+        const res = await fetch("/api/faucet", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            chainId,
+            address,
+            tokenAmount: amount || "1000",
+          }),
+        });
+        const json = (await res.json()) as { ok: boolean; error?: string };
+        if (!json.ok) throw new Error(json.error ?? "Faucet failed");
+      } else {
+        await writeContractAsync({
+          abi: mockErc20Abi,
+          address: (dir === "0to1" ? cfg.token0 : cfg.token1) as `0x${string}`,
+          functionName: "mint",
+          args: [address, amountWei],
+        });
+      }
       setStep("prep");
     } catch (e) {
       setError((e as Error).message);
@@ -227,7 +241,7 @@ export default function DemoConsolePage() {
                 <div className="absolute inset-0 bg-gradient-to-r from-gg-gold/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
                 <div className="relative flex items-center justify-center gap-2">
                   <Flame className="h-4 w-4 text-gg-gold" />
-                  Mint Tokens
+                  {cfg.chainId === 31337 ? "Get Tokens (Faucet)" : "Mint Tokens"}
                 </div>
               </button>
 
@@ -297,4 +311,3 @@ export default function DemoConsolePage() {
     </div>
   );
 }
-

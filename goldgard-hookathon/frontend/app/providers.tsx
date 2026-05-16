@@ -8,7 +8,6 @@ import { useState } from "react";
 
 const projectId = process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID ?? "00000000000000000000000000000000";
 const localRpcUrl = process.env.NEXT_PUBLIC_DEMO_RPC_URL ?? "http://127.0.0.1:8545";
-const sepoliaRpcUrl = process.env.NEXT_PUBLIC_SEPOLIA_RPC_URL;
 
 export function Providers({ children }: { children: React.ReactNode }) {
   const [queryClient] = useState(() => new QueryClient());
@@ -19,7 +18,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
       chains: [foundry, sepolia],
       transports: {
         [foundry.id]: http(localRpcUrl),
-        [sepolia.id]: sepoliaRpcUrl ? http(sepoliaRpcUrl) : http(),
+        [sepolia.id]: http(),
       },
       ssr: false,
     }),
