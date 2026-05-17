@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { useAccount, useChainId, usePublicClient, useWriteContract } from "wagmi";
 import { parseUnits } from "viem";
 import { ArrowRight, CheckCircle2, CircleDashed, ExternalLink, Flame, Shield } from "lucide-react";
+import { Display, Subhead, Body, Data, RuneStone, LeverageRune, Beacon, KnotworkDivider } from "@/components/DesignComponents";
 
 import { getDemoConfigForChain, isConfiguredAddress } from "../../lib/demoConfig";
 import { mockErc20Abi } from "../../lib/abi/mockErc20";
@@ -128,40 +129,39 @@ export default function DemoConsolePage() {
   const wrongNetwork = okConfig && chainId !== cfg.chainId;
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-[#0a1428] via-[#0a1428] to-[#0a0f1a] px-4 py-10 sm:py-16">
+    <div className="min-h-screen bg-gg-bg px-4 py-10 sm:py-16">
       <div className="mx-auto w-full max-w-3xl">
         {/* Header */}
         <div className="mb-10">
-          <div className="inline-flex items-center gap-2 rounded-full border border-gg-gold/30 bg-gg-surface/50 px-4 py-2 text-xs font-semibold text-gg-gold backdrop-blur-sm mb-4">
+          <div className="inline-flex items-center gap-2 rounded-full border border-aged-gold/30 bg-gg-surface/55 px-4 py-2 text-xs font-semibold text-aged-gold backdrop-blur-sm mb-4">
             <Shield className="h-3.5 w-3.5" />
             Atomic swap → rebalance → premium
           </div>
-          <h1 className="text-4xl md:text-5xl font-bold mb-4">
-            <span className="block text-white mb-2">Demo</span>
-            <span className="gradient-text text-4xl md:text-5xl font-bold">Console</span>
-          </h1>
-          <p className="text-gg-muted text-lg max-w-xl">
-            One transaction. The hook watches the oracle in <span className="font-mono text-gg-gold">beforeSwap</span>, takes a premium & rebalances in <span className="font-mono text-gg-gold">afterSwap</span>, then updates eligibility on liquidity events.
-          </p>
+          <Display variant="xl" className="mb-4">
+            Demo Console
+          </Display>
+          <Body className="text-gg-muted text-lg max-w-xl">
+            One transaction. The hook watches the oracle in <Data as="code">beforeSwap</Data>, takes a premium & rebalances in <Data as="code">afterSwap</Data>, then updates eligibility on liquidity events.
+          </Body>
         </div>
 
         {/* Config Warnings */}
         {!okConfig ? (
-          <div className="mb-6 rounded-xl border border-gg-border/50 bg-gg-gold/5 p-4 text-sm text-gg-muted">
+          <div className="mb-6 rounded-xl border border-gg-border/50 bg-aged-gold/5 p-4 text-sm text-gg-muted">
             <p className="font-semibold text-foreground mb-1">Demo config not configured</p>
-            Deploy locally and regenerate <span className="font-mono text-gg-gold">app/config/demoConfig.local.json</span>.
+            Deploy locally and regenerate <Data as="code">app/config/demoConfig.local.json</Data>.
           </div>
         ) : null}
 
         {wrongNetwork ? (
-          <div className="mb-6 rounded-xl border border-gg-border/50 bg-gg-blood/10 p-4 text-sm text-gg-blood">
+          <div className="mb-6 rounded-xl border border-gg-border/50 bg-ember-red/10 p-4 text-sm text-ember-red">
             <p className="font-semibold mb-1">Wrong network selected</p>
-            Switch to chainId <span className="font-mono">{cfg.chainId}</span> to run the demo.
+            Switch to chainId <Data as="code">{cfg.chainId}</Data> to run the demo.
           </div>
         ) : null}
 
         {/* Main Card */}
-        <div className="card-glow rounded-2xl p-8 backdrop-blur-sm space-y-8">
+        <RuneStone>
           {/* Step Indicators */}
           <div className="grid gap-3 grid-cols-4">
             {(["trade", "prep", "execute", "review"] as const).map((s) => (
@@ -169,7 +169,7 @@ export default function DemoConsolePage() {
                 key={s}
                 className={`rounded-xl border px-3 py-3 text-xs font-semibold transition-all duration-300 ${
                   step === s
-                    ? "border-gg-gold bg-gg-gold/10 text-gg-gold"
+                    ? "border-aged-gold bg-aged-gold/10 text-aged-gold"
                     : "border-gg-border/50 bg-gg-surface/30 text-gg-muted"
                 }`}
               >
@@ -187,7 +187,7 @@ export default function DemoConsolePage() {
 
           {/* Trade Input Section */}
           <div className="border-t border-gg-border/30 pt-8 space-y-6">
-            <h2 className="text-xl font-bold">Configure Trade</h2>
+            <Subhead>Configure Trade</Subhead>
 
             <div className="grid gap-6 sm:grid-cols-2">
               {/* Direction */}
@@ -200,8 +200,8 @@ export default function DemoConsolePage() {
                       onClick={() => setDir(d)}
                       className={`group relative h-12 rounded-xl font-semibold text-sm overflow-hidden transition-all duration-300 border ${
                         dir === d
-                          ? "border-gg-gold bg-gg-gold/10 text-gg-gold"
-                          : "border-gg-border/50 bg-gg-surface/30 text-foreground hover:border-gg-gold/50"
+                          ? "border-aged-gold bg-aged-gold/10 text-aged-gold"
+                          : "border-gg-border/50 bg-gg-surface/30 text-foreground hover:border-aged-gold/50"
                       }`}
                     >
                       <div className="relative flex items-center justify-center gap-1 h-full">
@@ -222,7 +222,7 @@ export default function DemoConsolePage() {
                   onChange={(e) => setAmount(e.target.value)}
                   placeholder="1000.0"
                   inputMode="decimal"
-                  className="h-12 w-full rounded-xl border border-gg-border/50 bg-gg-surface/30 px-4 text-foreground placeholder-gg-muted/50 text-sm focus:border-gg-gold focus:outline-none transition-colors duration-300"
+                  className="h-12 w-full rounded-xl border border-gg-border/50 bg-gg-surface/30 px-4 text-foreground placeholder-gg-muted/50 text-sm focus:border-aged-gold focus:outline-none transition-colors duration-300"
                 />
               </div>
             </div>
@@ -230,17 +230,17 @@ export default function DemoConsolePage() {
 
           {/* Action Buttons */}
           <div className="border-t border-gg-border/30 pt-8 space-y-4">
-            <h2 className="text-xl font-bold mb-4">Execute Swap</h2>
+            <Subhead>Execute Swap</Subhead>
 
             <div className="grid gap-3 sm:grid-cols-3">
               <button
                 disabled={!address || !okConfig || wrongNetwork || amountWei === 0n || busy}
                 onClick={mint}
-                className="group relative h-12 rounded-xl border border-gg-border/50 bg-gg-surface/30 font-semibold text-sm overflow-hidden transition-all duration-300 hover:border-gg-gold/50 disabled:opacity-40 disabled:cursor-not-allowed"
+                className="group relative h-12 rounded-xl border border-gg-border/50 bg-gg-surface/30 font-semibold text-sm overflow-hidden transition-all duration-300 hover:border-aged-gold/50 disabled:opacity-40 disabled:cursor-not-allowed"
               >
-                <div className="absolute inset-0 bg-gradient-to-r from-gg-gold/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+                <div className="absolute inset-0 bg-gradient-to-r from-aged-gold/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
                 <div className="relative flex items-center justify-center gap-2">
-                  <Flame className="h-4 w-4 text-gg-gold" />
+                  <Flame className="h-4 w-4 text-aged-gold" />
                   {cfg.chainId === 31337 ? "Get Tokens (Faucet)" : "Mint Tokens"}
                 </div>
               </button>
@@ -248,27 +248,23 @@ export default function DemoConsolePage() {
               <button
                 disabled={!address || !okConfig || wrongNetwork || amountWei === 0n || busy}
                 onClick={approve}
-                className="group relative h-12 rounded-xl border border-gg-border/50 bg-gg-surface/30 font-semibold text-sm overflow-hidden transition-all duration-300 hover:border-gg-gold/50 disabled:opacity-40 disabled:cursor-not-allowed"
+                className="group relative h-12 rounded-xl border border-gg-border/50 bg-gg-surface/30 font-semibold text-sm overflow-hidden transition-all duration-300 hover:border-aged-gold/50 disabled:opacity-40 disabled:cursor-not-allowed"
               >
-                <div className="absolute inset-0 bg-gradient-to-r from-gg-gold/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+                <div className="absolute inset-0 bg-gradient-to-r from-aged-gold/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
                 <div className="relative">Approve Router</div>
               </button>
 
-              <button
+              <LeverageRune
                 disabled={!address || !okConfig || wrongNetwork || amountWei === 0n || busy}
                 onClick={execute}
-                className="group relative h-12 rounded-xl font-semibold text-sm overflow-hidden transition-all duration-300 text-[#0A1428] disabled:opacity-40 disabled:cursor-not-allowed"
               >
-                <div className="absolute inset-0 bg-gradient-to-r from-gg-gold to-gg-gold2 group-hover:scale-105 transition-transform duration-300" />
-                <div className="relative flex items-center justify-center gap-2">
-                  Execute <ArrowRight className="h-4 w-4" />
-                </div>
-              </button>
+                Execute <ArrowRight className="h-4 w-4" />
+              </LeverageRune>
             </div>
 
             {/* Error Message */}
             {error ? (
-              <div className="rounded-xl border border-gg-border/50 bg-gg-blood/10 p-4 text-sm text-gg-blood">
+              <div className="rounded-xl border border-gg-border/50 bg-ember-red/10 p-4 text-sm text-ember-red">
                 <p className="font-semibold mb-1">Error</p>
                 {error}
               </div>
@@ -276,37 +272,37 @@ export default function DemoConsolePage() {
 
             {/* Transaction Result */}
             {txHash ? (
-              <div className="card-glow rounded-xl p-4 space-y-3">
-                <div className="text-sm font-semibold text-gg-gold flex items-center gap-2">
+              <RuneStone>
+                <div className="text-sm font-semibold text-aged-gold flex items-center gap-2">
                   <CheckCircle2 className="h-4 w-4" />
                   Transaction Submitted
                 </div>
-                <div className="flex items-center justify-between gap-3 bg-gg-surface/30 rounded-lg p-3">
-                  <span className="font-mono text-xs text-gg-muted break-all">{txHash}</span>
+                <div className="flex items-center justify-between gap-3 bg-gg-surface/30 rounded-lg p-3 mt-3">
+                  <Data as="code" className="break-all">{txHash}</Data>
                   <a
                     href={`https://sepolia.etherscan.io/tx/${txHash}`}
                     target="_blank"
                     rel="noreferrer"
-                    className="inline-flex items-center gap-1 text-xs text-gg-gold hover:text-gg-gold2 transition-colors whitespace-nowrap flex-shrink-0"
+                    className="inline-flex items-center gap-1 text-xs text-aged-gold hover:text-pale-gold transition-colors whitespace-nowrap flex-shrink-0"
                   >
                     View <ExternalLink className="h-3.5 w-3.5" />
                   </a>
                 </div>
-              </div>
+              </RuneStone>
             ) : null}
           </div>
 
           {/* Next Step CTA */}
           <div className="border-t border-gg-border/30 pt-8">
-            <p className="text-gg-muted text-sm">
+            <Body className="text-gg-muted text-sm">
               Next: verify the premium and reward accrual on the{" "}
-              <a href="/dashboard" className="text-gg-gold hover:text-gg-gold2 font-semibold transition-colors">
+              <a href="/dashboard" className="text-aged-gold hover:text-pale-gold font-semibold transition-colors">
                 dashboard
               </a>
               .
-            </p>
+            </Body>
           </div>
-        </div>
+        </RuneStone>
       </div>
     </div>
   );

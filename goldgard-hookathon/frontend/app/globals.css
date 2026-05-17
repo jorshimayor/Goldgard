@@ -1,17 +1,27 @@
 @import "tailwindcss";
 
 :root {
-  --gg-bg: #0a1428;
-  --gg-fg: #e8eef8;
-  --gg-muted: rgba(232, 238, 248, 0.7);
-  --gg-surface: rgba(255, 255, 255, 0.06);
-  --gg-surface-2: rgba(255, 255, 255, 0.09);
-  --gg-border: rgba(255, 255, 255, 0.1);
-  --gg-gold: #d4af77;
-  --gg-gold-2: #ffd700;
-  --gg-blood: #b81d2d;
-  --gg-shadow: rgba(0, 0, 0, 0.45);
-  --gg-glow: rgba(212, 175, 119, 0.3);
+  /* Viking Golden Robotic-Gothic Palette */
+  --forge-black: #0b0602;
+  --iron-grey: #212121;
+  --aged-gold: #d4b870;
+  --pale-gold: #f2e1a8;
+  --ember-red: #8b3a3a;
+  --runic-green: #3a5a4a;
+  --cold-steel: #5a7a8a;
+  
+  /* Legacy gg variables (mapped to new palette) */
+  --gg-bg: var(--forge-black);
+  --gg-fg: #f5e3a6;
+  --gg-muted: rgba(245, 227, 166, 0.75);
+  --gg-surface: rgba(255, 241, 188, 0.08);
+  --gg-surface-2: rgba(255, 238, 172, 0.11);
+  --gg-border: rgba(245, 227, 166, 0.18);
+  --gg-gold: var(--aged-gold);
+  --gg-gold-2: var(--pale-gold);
+  --gg-blood: var(--ember-red);
+  --gg-shadow: rgba(0, 0, 0, 0.65);
+  --gg-glow: rgba(212, 184, 108, 0.35);
 }
 
 @keyframes float {
@@ -65,22 +75,24 @@
   --color-gg-gold-2: var(--gg-gold-2);
   --color-gg-blood: var(--gg-blood);
   --shadow-gg: 0 20px 60px var(--gg-shadow);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --font-display: var(--font-cinzel);
+  --font-subhead: var(--font-cormorant);
+  --font-body: var(--font-inter);
+  --font-data: var(--font-jetbrains);
 }
 
 body {
   background: var(--gg-bg);
   color: var(--gg-fg);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-body), system-ui, -apple-system, sans-serif;
 }
 
 .gg-bg {
   background:
-    radial-gradient(1200px 600px at 30% -20%, rgba(212, 175, 119, 0.18), transparent 60%),
-    radial-gradient(900px 500px at 90% 0%, rgba(255, 215, 0, 0.08), transparent 55%),
-    radial-gradient(900px 700px at 20% 110%, rgba(184, 29, 45, 0.10), transparent 60%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.04), transparent 220px);
+    radial-gradient(circle at 10% 20%, rgba(242, 225, 168, 0.18), transparent 18%),
+    radial-gradient(circle at 80% 10%, rgba(212, 184, 108, 0.14), transparent 16%),
+    radial-gradient(circle at 50% 120%, rgba(255, 224, 120, 0.08), transparent 30%),
+    linear-gradient(180deg, rgba(11, 6, 2, 1) 0%, rgba(19, 11, 5, 1) 100%);
 }
 
 .gg-runes {
@@ -137,9 +149,269 @@ body {
 }
 
 .gradient-text {
-  background: linear-gradient(135deg, #d4af77 0%, #ffd700 50%, #d4af77 100%);
+  background: linear-gradient(135deg, #f7e2a1 0%, #f2cb60 50%, #f7e2a1 100%);
   background-size: 200% 200%;
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
+}
+
+/* ============================================================
+   VIKING GOLDEN ROBOTIC-GOTHIC COMPONENT MOTIFS
+   ============================================================ */
+
+/* Rune Stones - Stat Cards */
+.rune-stone {
+  position: relative;
+  background: linear-gradient(135deg, rgba(201, 169, 97, 0.15) 0%, rgba(90, 122, 138, 0.08) 100%);
+  border: 2px solid rgba(201, 169, 97, 0.3);
+  border-radius: 4px;
+  padding: 1.5rem;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  overflow: hidden;
+}
+
+.rune-stone::before {
+  content: '';
+  position: absolute;
+  inset: -50%;
+  background: linear-gradient(45deg, transparent 30%, rgba(232, 213, 168, 0.1), transparent 70%);
+  transform: rotate(45deg);
+  animation: runeShimmer 3s infinite;
+}
+
+@keyframes runeShimmer {
+  0% { transform: translateX(-100%) translateY(-100%) rotate(45deg); }
+  100% { transform: translateX(100%) translateY(100%) rotate(45deg); }
+}
+
+.rune-stone:hover {
+  border-color: rgba(201, 169, 97, 0.6);
+  background: linear-gradient(135deg, rgba(201, 169, 97, 0.25) 0%, rgba(90, 122, 138, 0.12) 100%);
+  box-shadow: 0 0 20px rgba(201, 169, 97, 0.25);
+}
+
+.rune-stone-content {
+  position: relative;
+  z-index: 1;
+}
+
+/* Leverage Rune - Primary Action Buttons */
+.leverage-rune {
+  position: relative;
+  font-family: var(--font-display);
+  font-weight: 700;
+  padding: 0.75rem 1.5rem;
+  background: linear-gradient(135deg, rgba(201, 169, 97, 0.8) 0%, rgba(232, 213, 168, 0.6) 100%);
+  color: var(--forge-black);
+  border: 2px solid rgba(201, 169, 97, 1);
+  border-radius: 2px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  cursor: pointer;
+  transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+  overflow: hidden;
+}
+
+.leverage-rune::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.3), transparent);
+  transform: translateX(-100%);
+  transition: transform 0.6s;
+}
+
+.leverage-rune:hover {
+  background: linear-gradient(135deg, rgba(201, 169, 97, 1) 0%, rgba(232, 213, 168, 0.8) 100%);
+  box-shadow: 0 0 30px rgba(201, 169, 97, 0.4), inset 0 0 20px rgba(255, 255, 255, 0.1);
+  transform: translateY(-2px);
+}
+
+.leverage-rune:hover::before {
+  transform: translateX(100%);
+}
+
+.leverage-rune:active {
+  transform: translateY(0);
+}
+
+/* Forged Lines - Chart/Line Decorations */
+.forged-lines {
+  position: relative;
+  width: 100%;
+  height: 2px;
+  background: linear-gradient(90deg, 
+    transparent 0%,
+    rgba(245, 227, 166, 0.35) 15%,
+    rgba(212, 184, 108, 0.55) 50%,
+    rgba(245, 227, 166, 0.35) 85%,
+    transparent 100%);
+  margin: 1.5rem 0;
+}
+
+.forged-lines::before,
+.forged-lines::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  width: 8px;
+  height: 8px;
+  background: var(--aged-gold);
+  border-radius: 50%;
+  transform: translateY(-50%);
+  box-shadow: 0 0 10px rgba(201, 169, 97, 0.5);
+}
+
+.forged-lines::before {
+  left: 0;
+}
+
+.forged-lines::after {
+  right: 0;
+}
+
+/* Beacons - Status Indicators */
+.beacon {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.beacon-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  position: relative;
+  box-shadow: 0 0 8px currentColor;
+  animation: beaconPulse 2s ease-in-out infinite;
+}
+
+.beacon-dot.status-active {
+  background: var(--runic-green);
+  color: var(--runic-green);
+}
+
+.beacon-dot.status-warning {
+  background: var(--aged-gold);
+  color: var(--aged-gold);
+}
+
+.beacon-dot.status-error {
+  background: var(--ember-red);
+  color: var(--ember-red);
+}
+
+.beacon-dot.status-neutral {
+  background: var(--cold-steel);
+  color: var(--cold-steel);
+}
+
+@keyframes beaconPulse {
+  0%, 100% {
+    box-shadow: 0 0 8px currentColor, 0 0 0 0 currentColor;
+    opacity: 1;
+  }
+  50% {
+    box-shadow: 0 0 12px currentColor, 0 0 8px 4px rgba(0, 0, 0, 0.1);
+    opacity: 0.8;
+  }
+}
+
+.beacon-label {
+  font-family: var(--font-data);
+  font-size: 0.875rem;
+  font-weight: 500;
+}
+
+/* Knotwork Dividers */
+.knotwork-divider {
+  position: relative;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  margin: 2rem 0;
+  overflow: hidden;
+}
+
+.knotwork-divider::before,
+.knotwork-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--aged-gold), transparent);
+}
+
+.knotwork-divider-center {
+  position: relative;
+  padding: 0 1.5rem;
+  color: var(--aged-gold);
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 1.25rem;
+  letter-spacing: 2px;
+  z-index: 1;
+}
+
+.knotwork-divider-center::before,
+.knotwork-divider-center::after {
+  content: '◆';
+  margin: 0 0.5rem;
+  opacity: 0.8;
+}
+
+/* Knotwork pattern background */
+.knotwork-pattern {
+  position: relative;
+  background-image:
+    repeating-linear-gradient(0deg, transparent, transparent 20px, rgba(201, 169, 97, 0.08) 20px, rgba(201, 169, 97, 0.08) 21px),
+    repeating-linear-gradient(90deg, transparent, transparent 20px, rgba(201, 169, 97, 0.08) 20px, rgba(201, 169, 97, 0.08) 21px);
+}
+
+/* ============================================================
+   TYPOGRAPHY UTILITIES
+   ============================================================ */
+
+.text-display {
+  font-family: var(--font-display);
+  font-weight: 700;
+}
+
+.text-display-xl {
+  font-family: var(--font-display);
+  font-size: 3rem;
+  font-weight: 900;
+  line-height: 1.1;
+  letter-spacing: -1px;
+}
+
+.text-display-lg {
+  font-family: var(--font-display);
+  font-size: 2.25rem;
+  font-weight: 900;
+  line-height: 1.2;
+  letter-spacing: -0.5px;
+}
+
+.text-subhead {
+  font-family: var(--font-subhead);
+  font-weight: 600;
+  font-size: 1.375rem;
+  line-height: 1.4;
+}
+
+.text-body {
+  font-family: var(--font-body);
+  font-weight: 400;
+  font-size: 1rem;
+  line-height: 1.6;
+}
+
+.text-data {
+  font-family: var(--font-data);
+  font-weight: 500;
+  font-size: 0.875rem;
+  line-height: 1.5;
+  letter-spacing: 0.25px;
 }

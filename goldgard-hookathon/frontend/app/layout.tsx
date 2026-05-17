@@ -1,5 +1,10 @@
 import type { Metadata } from "next";
-import { Inter, Roboto_Mono } from "next/font/google";
+import {
+  Cinzel,
+  Cormorant_Garamond,
+  Inter,
+  JetBrains_Mono,
+} from "next/font/google";
 import "@rainbow-me/rainbowkit/styles.css";
 import "./globals.css";
 
@@ -8,14 +13,28 @@ import { Nav } from "../components/Nav";
 
 export const dynamic = "force-dynamic";
 
-const geistSans = Inter({
-  variable: "--font-geist-sans",
+const cinzelDisplay = Cinzel({
+  variable: "--font-cinzel",
   subsets: ["latin"],
+  weight: ["700", "900"],
 });
 
-const geistMono = Roboto_Mono({
-  variable: "--font-geist-mono",
+const cormorantGaramond = Cormorant_Garamond({
+  variable: "--font-cormorant",
   subsets: ["latin"],
+  weight: ["400", "500", "600", "700"],
+});
+
+const interBody = Inter({
+  variable: "--font-inter",
+  subsets: ["latin"],
+  weight: ["400", "500", "600", "700"],
+});
+
+const jetbrainsMono = JetBrains_Mono({
+  variable: "--font-jetbrains",
+  subsets: ["latin"],
+  weight: ["400", "500", "600", "700"],
 });
 
 export const metadata: Metadata = {
@@ -31,7 +50,7 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      className={`${cinzelDisplay.variable} ${cormorantGaramond.variable} ${interBody.variable} ${jetbrainsMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col gg-bg gg-runes">
         <Providers>
