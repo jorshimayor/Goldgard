@@ -4,6 +4,7 @@ import local from "../app/config/demoConfig.local.json";
 import sepolia from "../app/config/demoConfig.sepolia.json";
 
 const DemoConfigSchema = z.object({
+  callbackReceiver: z.string().optional(),
   chainId: z.number(),
   deployer: z.string(),
   poolManager: z.string(),

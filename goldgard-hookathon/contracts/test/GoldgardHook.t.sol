@@ -641,6 +641,30 @@ contract GoldgardHookTest is Test {
         assertEq(p, 0);
     }
 
+    function testCoverageCapLimitsPayout() public {
+        hook.setCoverageCapBps(1);
+        agg.setAnswer(2e8);
+
+        PoolId poolId = key.toId();
+        bytes32 positionKey = keccak256(
+            abi.encode(
+                poolId,
+                address(this),
+                TickMath.minUsableTick(key.tickSpacing),
+                TickMath.maxUsableTick(key.tickSpacing),
+                bytes32(0)
+            )
+        );
+        (, , , , uint256 principalToken1, , , ) = hook.positions(positionKey);
+
+        uint256 payout = hook.previewClaim(address(this), poolId);
+        uint256 expected = principalToken1 / 10_000;
+        uint256 available = IERC20(address(safety.asset())).balanceOf(address(safety));
+        if (expected > available) expected = available;
+        assertEq(payout, expected);
+        require(payout > 0);
+    }
+
     function testRebalanceExecutesBothDirections() public {
         SwapParams memory p = SwapParams({
             zeroForOne: false,

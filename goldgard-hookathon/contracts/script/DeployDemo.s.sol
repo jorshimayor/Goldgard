@@ -156,6 +156,10 @@ contract DeployDemo is Script {
         );
         hook.setAuthorizedCaller(address(callbackReceiver));
         safety.setAuthorizedCaller(address(callbackReceiver));
+
+        uint256 capBps = vm.envOr("COVERAGE_CAP_BPS", uint256(10_000));
+        if (capBps > 10_000) capBps = 10_000;
+        hook.setCoverageCapBps(capBps);
     }
 
     function _initPoolAndLiquidity(address deployer) internal {

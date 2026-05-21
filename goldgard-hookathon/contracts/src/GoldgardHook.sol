@@ -116,6 +116,7 @@ contract GoldgardHook is BaseHook, Ownable2Step, IUnlockCallback {
     uint256 public constant BPS = 10_000;
     uint256 public constant PREMIUM_BPS = 2;
     uint16 internal constant MAX_PREMIUM_BPS = 100;
+    uint16 internal constant MAX_COVERAGE_CAP_BPS = 10_000;
     uint64 internal constant ALERT_TTL_SECONDS = 30 minutes;
 
     bytes32 internal constant TS_REBALANCE_IN_PROGRESS =
@@ -164,6 +165,7 @@ contract GoldgardHook is BaseHook, Ownable2Step, IUnlockCallback {
     uint256 public reactiveAlert;
     uint256 public minRebalanceAmountIn;
     uint16 public premiumBps;
+    uint16 public coverageCapBps;
 
     constructor(
         address _owner,
@@ -178,6 +180,7 @@ contract GoldgardHook is BaseHook, Ownable2Step, IUnlockCallback {
         hedgeReserve = _hedgeReserve;
         rewards = _rewards;
         premiumBps = uint16(PREMIUM_BPS);
+        coverageCapBps = MAX_COVERAGE_CAP_BPS;
 
         Hooks.Permissions memory perms;
         perms.afterAddLiquidity = true;
@@ -211,6 +214,11 @@ contract GoldgardHook is BaseHook, Ownable2Step, IUnlockCallback {
         if (caller == address(0)) revert BadConfig();
         authorizedCaller = caller;
         emit AuthorizedCallerSet(caller);
+    }
+
+    function setCoverageCapBps(uint256 newCapBps) external onlyOwner {
+        if (newCapBps > MAX_COVERAGE_CAP_BPS) revert BadConfig();
+        coverageCapBps = OZSafeCast.toUint16(newCapBps);
     }
 
     function getReactiveAlert() external view returns (uint8 level, uint64 until) {
@@ -652,6 +660,8 @@ contract GoldgardHook is BaseHook, Ownable2Step, IUnlockCallback {
         uint256 r = Math.mulDiv(current, 1e18, p0);
 
         uint256 ilBps = _impermanentLossBps(r);
+        uint16 cap = coverageCapBps;
+        if (ilBps > cap) ilBps = cap;
         payoutAssets = Math.mulDiv(p.principalToken1, ilBps, BPS);
 
         uint256 available = IERC20(address(safetyModule.asset())).balanceOf(

@@ -8,7 +8,19 @@
 // 1. STAT CARD GRID (Most Common Pattern)
 // ============================================================================
 
-import { RuneStone, KnotworkGrid, Display, Subhead, Body } from '@/components/DesignComponents';
+import {
+  Beacon,
+  Body,
+  Data,
+  Display,
+  ForgedLines,
+  KnotworkDivider,
+  KnotworkGrid,
+  LeverageRune,
+  RuneStone,
+  Subhead,
+} from "@/components/DesignComponents";
+import { COLORS, PALETTE_SWATCHES } from "@/lib/design-system";
 
 export function StatCardExample() {
   return (
@@ -25,8 +37,6 @@ export function StatCardExample() {
 // ============================================================================
 // 2. HERO SECTION WITH BUTTONS
 // ============================================================================
-
-import { Display, Body, LeverageRune, ForgedLines } from '@/components/DesignComponents';
 
 export function HeroSection() {
   return (
@@ -50,8 +60,6 @@ export function HeroSection() {
 // 3. STATUS DASHBOARD
 // ============================================================================
 
-import { Beacon, Subhead, Data } from '@/components/DesignComponents';
-
 export function StatusDashboard() {
   return (
     <div className="space-y-4">
@@ -72,8 +80,6 @@ export function StatusDashboard() {
 // ============================================================================
 // 4. DATA TABLE SECTION
 // ============================================================================
-
-import { Subhead, Body, Data, KnotworkDivider } from '@/components/DesignComponents';
 
 export function DataSection() {
   return (
@@ -178,8 +184,6 @@ export function SimpleTextExample() {
 // 8. COLOR PALETTE REFERENCE (For debugging/development)
 // ============================================================================
 
-import { COLORS, PALETTE_SWATCHES } from '@/lib/design-system';
-
 export function ColorPaletteReference() {
   return (
     <div className="flex gap-4">
@@ -199,18 +203,6 @@ export function ColorPaletteReference() {
 // ============================================================================
 // 9. COMBINING COMPONENTS
 // ============================================================================
-
-import {
-  Display,
-  Subhead,
-  Body,
-  Data,
-  RuneStone,
-  Beacon,
-  KnotworkDivider,
-  LeverageRune,
-  ForgedLines,
-} from '@/components/DesignComponents';
 
 export function CompleteExample() {
   return (
