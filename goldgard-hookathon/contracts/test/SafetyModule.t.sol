@@ -8,6 +8,7 @@ import {IERC20} from "openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import {MockERC20} from "solmate/src/test/utils/mocks/MockERC20.sol";
 
 import {SafetyModule, IGoldgardClaimsView} from "../src/SafetyModule.sol";
+import {GoldgardCallbackReceiver} from "../src/GoldgardCallbackReceiver.sol";
 import {PoolId} from "v4-core/types/PoolId.sol";
 
 contract MockClaimsView is IGoldgardClaimsView {
@@ -32,11 +33,15 @@ contract MockClaimsView is IGoldgardClaimsView {
 }
 
 contract SafetyModuleTest is Test {
+    event ClaimPaid(address indexed lp, uint256 amount, uint256 reservePostBalance);
+
     MockERC20 internal asset;
     SafetyModule internal safety;
     MockClaimsView internal claims;
+    GoldgardCallbackReceiver internal receiver;
 
     address internal hook = address(0xBEEF);
+    address internal reactiveProxy = address(0xCA11);
     address internal alice = address(0xA11CE);
 
     function setUp() public {
@@ -52,6 +57,14 @@ contract SafetyModuleTest is Test {
         safety.setHook(hook);
         safety.setClaimsView(IGoldgardClaimsView(address(claims)));
         safety.setCooldownSeconds(0);
+
+        receiver = new GoldgardCallbackReceiver(
+            address(this),
+            reactiveProxy,
+            address(0),
+            address(safety)
+        );
+        safety.setAuthorizedCaller(address(receiver));
 
         asset.mint(hook, 1_000_000e18);
         vm.prank(hook);
@@ -114,6 +127,51 @@ contract SafetyModuleTest is Test {
         require(asset.balanceOf(alice) == aliceBefore + 10e18);
         require(safety.claimRequestedAt(alice, poolId) == 0);
         require(safety.totalAssets() == 90e18);
+    }
+
+    function testAuthorizedCallerAndEpochCheckpointViaReceiver() public {
+        vm.expectRevert(SafetyModule.OnlyAuthorized.selector);
+        safety.epochCheckpoint();
+
+        vm.prank(hook);
+        safety.depositPremium(7e18);
+
+        PoolId poolId = PoolId.wrap(bytes32(uint256(123)));
+        claims.setEligible(true);
+        claims.setPayout(2e18);
+        vm.prank(alice);
+        safety.requestClaim(poolId);
+        vm.prank(alice);
+        safety.executeClaim(poolId);
+
+        uint64 beforeEpoch = safety.epochId();
+        uint64 beforeStartedAt = safety.epochStartedAt();
+
+        vm.prank(reactiveProxy);
+        receiver.handleEpochCheckpoint();
+
+        require(safety.epochId() == beforeEpoch + 1);
+        require(safety.epochStartedAt() >= beforeStartedAt);
+        require(safety.epochPremiumIn() == 0);
+        require(safety.epochPayoutOut() == 0);
+    }
+
+    function testClaimPaidEventEmitted() public {
+        PoolId poolId = PoolId.wrap(bytes32(uint256(123)));
+        vm.prank(hook);
+        safety.depositPremium(10e18);
+
+        claims.setEligible(true);
+        claims.setPayout(3e18);
+
+        vm.prank(alice);
+        safety.requestClaim(poolId);
+
+        vm.expectEmit(true, false, false, true);
+        emit ClaimPaid(alice, 3e18, 7e18);
+
+        vm.prank(alice);
+        safety.executeClaim(poolId);
     }
 
     function testExecuteClaimCapsToAvailableAssets() public {

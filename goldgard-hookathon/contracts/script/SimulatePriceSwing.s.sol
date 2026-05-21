@@ -25,10 +25,29 @@ contract SimulatePriceSwing is Script {
     using PoolIdLibrary for PoolKey;
     using StateLibrary for IPoolManager;
 
+    IPoolManager internal manager;
+    SwapRouterNoChecks internal swapRouter;
+    MockERC20 internal token0;
+    MockERC20 internal token1;
+    MockAggregatorV3 internal agg;
+    GoldgardHook internal hook;
+    HedgeReserve internal hedge;
+    PoolKey internal key;
+    PoolId internal poolId;
+    uint256 internal startPrice1e18;
+
     function run() external {
         string memory configPath = vm.envOr("DEMO_CONFIG", string("../frontend/app/config/demoConfig.local.json"));
         string memory raw = vm.readFile(configPath);
 
+        _loadFromConfig(raw);
+        address trader = _startBroadcast();
+        _tuneConfigs();
+        _simulate(trader);
+        vm.stopBroadcast();
+    }
+
+    function _loadFromConfig(string memory raw) internal {
         address managerAddr = raw.readAddress(".poolManager");
         address hookAddr = raw.readAddress(".hook");
         address token0Addr = raw.readAddress(".token0");
@@ -40,15 +59,15 @@ contract SimulatePriceSwing is Script {
         int24 tickSpacing = int24(int256(raw.readUint(".tickSpacing")));
         uint24 fee = uint24(raw.readUint(".fee"));
 
-        IPoolManager manager = IPoolManager(managerAddr);
-        SwapRouterNoChecks swapRouter = SwapRouterNoChecks(payable(swapRouterAddr));
-        MockERC20 token0 = MockERC20(token0Addr);
-        MockERC20 token1 = MockERC20(token1Addr);
-        MockAggregatorV3 agg = MockAggregatorV3(aggAddr);
-        GoldgardHook hook = GoldgardHook(hookAddr);
-        HedgeReserve hedge = HedgeReserve(hedgeAddr);
+        manager = IPoolManager(managerAddr);
+        swapRouter = SwapRouterNoChecks(payable(swapRouterAddr));
+        token0 = MockERC20(token0Addr);
+        token1 = MockERC20(token1Addr);
+        agg = MockAggregatorV3(aggAddr);
+        hook = GoldgardHook(hookAddr);
+        hedge = HedgeReserve(hedgeAddr);
 
-        PoolKey memory key = PoolKey({
+        key = PoolKey({
             currency0: Currency.wrap(token0Addr),
             currency1: Currency.wrap(token1Addr),
             fee: fee,
@@ -56,18 +75,13 @@ contract SimulatePriceSwing is Script {
             hooks: IHooks(hookAddr)
         });
 
-        PoolId poolId = key.toId();
+        poolId = key.toId();
         (uint160 startSqrtPriceX96,,,) = manager.getSlot0(poolId);
-        uint256 startPrice1e18 = _priceFromSqrt(startSqrtPriceX96);
+        startPrice1e18 = _priceFromSqrt(startSqrtPriceX96);
+    }
 
-        uint256 bpsMove = vm.envOr("MOVE_BPS", uint256(1000));
-        uint256 steps = vm.envOr("STEPS", uint256(5));
-        uint256 amountPerStep = vm.envOr("AMOUNT_PER_STEP", uint256(10_000e18));
-
-        bool priceUp = vm.envOr("DIRECTION_UP", true);
-
+    function _startBroadcast() internal returns (address trader) {
         uint256 pk = _privateKeyOrZero();
-        address trader;
         if (pk != 0) {
             trader = vm.addr(pk);
             vm.startBroadcast(pk);
@@ -75,7 +89,9 @@ contract SimulatePriceSwing is Script {
             vm.startBroadcast();
             trader = tx.origin;
         }
+    }
 
+    function _tuneConfigs() internal {
         uint256 maxDevBps = vm.envOr(
             "MAX_SPOT_ORACLE_DEVIATION_BPS",
             uint256(type(uint16).max)
@@ -86,57 +102,61 @@ contract SimulatePriceSwing is Script {
             try hedge.setMaxSpotOracleDeviationBps(10_000) {} catch {}
         }
 
-        {
-            (
-                uint24 baseLpFee,
-                uint24 maxLpFee,
-                uint16 feeSlopeBps,
-                uint16 deviationBps,
-                uint16 circuitBreakerBps,
-                uint16 rebalanceBps,
-                uint32 twapWindowSeconds,
-                uint32 circuitBreakerCooldownSeconds,
-                uint64 pausedUntil
-            ) = hook.poolConfig(poolId);
+        (
+            uint24 baseLpFee,
+            uint24 maxLpFee,
+            uint16 feeSlopeBps,
+            uint16 deviationBps,
+            uint16 circuitBreakerBps,
+            uint16 rebalanceBps,
+            uint32 twapWindowSeconds,
+            uint32 circuitBreakerCooldownSeconds,
+            uint64 pausedUntil
+        ) = hook.poolConfig(poolId);
 
-            GoldgardHook.PoolConfig memory cfg = GoldgardHook.PoolConfig({
-                baseLpFee: baseLpFee,
-                maxLpFee: maxLpFee,
-                feeSlopeBps: feeSlopeBps,
-                deviationBps: deviationBps,
-                circuitBreakerBps: circuitBreakerBps,
-                rebalanceBps: rebalanceBps,
-                twapWindowSeconds: twapWindowSeconds,
-                circuitBreakerCooldownSeconds: circuitBreakerCooldownSeconds,
-                pausedUntil: pausedUntil
-            });
+        GoldgardHook.PoolConfig memory cfg = GoldgardHook.PoolConfig({
+            baseLpFee: baseLpFee,
+            maxLpFee: maxLpFee,
+            feeSlopeBps: feeSlopeBps,
+            deviationBps: deviationBps,
+            circuitBreakerBps: circuitBreakerBps,
+            rebalanceBps: rebalanceBps,
+            twapWindowSeconds: twapWindowSeconds,
+            circuitBreakerCooldownSeconds: circuitBreakerCooldownSeconds,
+            pausedUntil: pausedUntil
+        });
 
-            uint256 hookDevBps = vm.envOr(
-                "HOOK_DEVIATION_BPS",
-                uint256(type(uint16).max)
-            );
-            uint256 hookCbBps = vm.envOr(
-                "HOOK_CIRCUIT_BREAKER_BPS",
-                uint256(type(uint16).max)
-            );
-            uint256 hookCbCooldown = vm.envOr(
-                "HOOK_CIRCUIT_BREAKER_COOLDOWN_SECONDS",
-                uint256(0)
-            );
-            bool resetPause = vm.envOr("RESET_HOOK_PAUSE", true);
+        uint256 hookDevBps = vm.envOr(
+            "HOOK_DEVIATION_BPS",
+            uint256(type(uint16).max)
+        );
+        uint256 hookCbBps = vm.envOr(
+            "HOOK_CIRCUIT_BREAKER_BPS",
+            uint256(type(uint16).max)
+        );
+        uint256 hookCbCooldown = vm.envOr(
+            "HOOK_CIRCUIT_BREAKER_COOLDOWN_SECONDS",
+            uint256(0)
+        );
+        bool resetPause = vm.envOr("RESET_HOOK_PAUSE", true);
 
-            if (hookDevBps > type(uint16).max) hookDevBps = type(uint16).max;
-            if (hookCbBps > type(uint16).max) hookCbBps = type(uint16).max;
-            if (hookCbCooldown > type(uint32).max)
-                hookCbCooldown = type(uint32).max;
+        if (hookDevBps > type(uint16).max) hookDevBps = type(uint16).max;
+        if (hookCbBps > type(uint16).max) hookCbBps = type(uint16).max;
+        if (hookCbCooldown > type(uint32).max) hookCbCooldown = type(uint32).max;
 
-            cfg.deviationBps = uint16(hookDevBps);
-            cfg.circuitBreakerBps = uint16(hookCbBps);
-            cfg.circuitBreakerCooldownSeconds = uint32(hookCbCooldown);
-            if (resetPause) cfg.pausedUntil = 0;
+        cfg.deviationBps = uint16(hookDevBps);
+        cfg.circuitBreakerBps = uint16(hookCbBps);
+        cfg.circuitBreakerCooldownSeconds = uint32(hookCbCooldown);
+        if (resetPause) cfg.pausedUntil = 0;
 
-            try hook.setPoolConfig(key, cfg) {} catch {}
-        }
+        try hook.setPoolConfig(key, cfg) {} catch {}
+    }
+
+    function _simulate(address trader) internal {
+        uint256 bpsMove = vm.envOr("MOVE_BPS", uint256(1000));
+        uint256 steps = vm.envOr("STEPS", uint256(5));
+        uint256 amountPerStep = vm.envOr("AMOUNT_PER_STEP", uint256(10_000e18));
+        bool priceUp = vm.envOr("DIRECTION_UP", true);
 
         for (uint256 i = 1; i <= steps; i++) {
             uint256 stepBps = (bpsMove * i) / steps;
@@ -166,8 +186,6 @@ contract SimulatePriceSwing is Script {
                 swapRouter.swap(key, p);
             }
         }
-
-        vm.stopBroadcast();
     }
 
     function _privateKeyOrZero() internal view returns (uint256 pk) {

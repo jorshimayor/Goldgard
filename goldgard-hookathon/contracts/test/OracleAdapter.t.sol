@@ -24,6 +24,13 @@ import {MockAggregatorV3} from "./mocks/MockAggregatorV3.sol";
 contract OracleAdapterTest is Test {
     using PoolIdLibrary for PoolKey;
 
+    event OraclePriceUpdated(
+        uint256 twap,
+        uint256 external_,
+        uint256 deviationBps,
+        uint256 timestamp
+    );
+
     PoolManager internal manager;
     PoolModifyLiquidityTestNoChecks internal liqRouter;
     SwapRouterNoChecks internal swapRouter;
@@ -189,6 +196,136 @@ contract OracleAdapterTest is Test {
         }
 
         uint160 twap = oracle.getTwapSqrtPriceX96(key, 3 hours);
+        require(twap != 0);
+    }
+
+    function testUpdateFromPoolEmitsOraclePriceUpdated() public {
+        oracle.updateFromPool(IPoolManager(address(manager)), key);
+
+        vm.warp(block.timestamp + 11 minutes);
+        vm.recordLogs();
+        oracle.updateFromPool(IPoolManager(address(manager)), key);
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+
+        bytes32 sig = keccak256(
+            "OraclePriceUpdated(uint256,uint256,uint256,uint256)"
+        );
+        bool found;
+        for (uint256 i = 0; i < logs.length; i++) {
+            if (logs[i].topics.length > 0 && logs[i].topics[0] == sig) {
+                (uint256 twap, uint256 external_, uint256 deviationBps, uint256 ts) = abi.decode(
+                    logs[i].data,
+                    (uint256, uint256, uint256, uint256)
+                );
+                require(twap != 0);
+                require(external_ == 1e18);
+                deviationBps;
+                require(ts == block.timestamp);
+                found = true;
+                break;
+            }
+        }
+        assertTrue(found);
+    }
+
+    function testGetChainlinkSqrtPriceReturnsFalseWhenAnswerNonPositive() public {
+        agg.setAnswer(0);
+        (, bool ok) = oracle.getChainlinkSqrtPriceX96(key);
+        assertFalse(ok);
+    }
+
+    function testGetChainlinkSqrtPriceReturnsFalseWhenUpdatedAtZero() public {
+        vm.store(address(agg), bytes32(uint256(1)), bytes32(uint256(0)));
+        (, bool ok) = oracle.getChainlinkSqrtPriceX96(key);
+        assertFalse(ok);
+    }
+
+    function testGetChainlinkSqrtPriceReturnsFalseWhenUpdatedAtInFuture() public {
+        vm.store(
+            address(agg),
+            bytes32(uint256(1)),
+            bytes32(block.timestamp + 1)
+        );
+        (, bool ok) = oracle.getChainlinkSqrtPriceX96(key);
+        assertFalse(ok);
+    }
+
+    function testGetTwapReturnsZeroWhenNeverUpdated() public {
+        OracleAdapter fresh = new OracleAdapter(address(this));
+        uint160 twap = fresh.getTwapSqrtPriceX96(key, 600);
+        assertEq(twap, 0);
+    }
+
+    function testGetPriceReturnsZeroWhenNoChainlinkAndNoTwap() public {
+        OracleAdapter fresh = new OracleAdapter(address(this));
+        OracleAdapter.PoolOracleConfig memory cfg = OracleAdapter.PoolOracleConfig({
+            aggregator: IChainlinkAggregatorV3(address(0)),
+            maxStaleSeconds: 3600,
+            aggregatorDecimals: 8,
+            token0Decimals: 18,
+            token1Decimals: 18
+        });
+        fresh.setPoolOracleConfig(key, cfg);
+        uint256 p = fresh.getPrice1e18(key, 600);
+        assertEq(p, 0);
+    }
+
+    function testSetHookOnlyOwner() public {
+        OracleAdapter fresh = new OracleAdapter(address(this));
+        vm.prank(address(0xBEEF));
+        vm.expectRevert();
+        fresh.setHook(address(1));
+    }
+
+    function testUpdateFromPoolOnlyHook() public {
+        OracleAdapter fresh = new OracleAdapter(address(this));
+        fresh.setHook(address(0xBEEF));
+        vm.expectRevert(OracleAdapter.OnlyHook.selector);
+        fresh.updateFromPool(IPoolManager(address(manager)), key);
+    }
+
+    function testChainlinkScalingBranchesDecimals18Token0Gt18Token1Lt18() public {
+        MockAggregatorV3 agg18 = new MockAggregatorV3(18, 1e18);
+        OracleAdapter.PoolOracleConfig memory cfg = OracleAdapter.PoolOracleConfig({
+            aggregator: IChainlinkAggregatorV3(address(agg18)),
+            maxStaleSeconds: 3600,
+            aggregatorDecimals: 18,
+            token0Decimals: 24,
+            token1Decimals: 6
+        });
+        oracle.setPoolOracleConfig(key, cfg);
+        (uint160 sqrtPriceX96, bool ok) = oracle.getChainlinkSqrtPriceX96(key);
+        require(ok);
+        require(sqrtPriceX96 != 0);
+    }
+
+    function testChainlinkScalingBranchAggregatorDecimalsLt18() public {
+        OracleAdapter.PoolOracleConfig memory cfg = OracleAdapter.PoolOracleConfig({
+            aggregator: IChainlinkAggregatorV3(address(agg)),
+            maxStaleSeconds: 3600,
+            aggregatorDecimals: 6,
+            token0Decimals: 18,
+            token1Decimals: 18
+        });
+        oracle.setPoolOracleConfig(key, cfg);
+        (uint160 sqrtPriceX96, bool ok) = oracle.getChainlinkSqrtPriceX96(key);
+        require(ok);
+        require(sqrtPriceX96 != 0);
+    }
+
+    function testGetPriceUsesChainlinkWhenAvailable() public {
+        uint256 p = oracle.getPrice1e18(key, 600);
+        uint256 strict = oracle.getPrice1e18Strict(key);
+        require(p == strict);
+    }
+
+    function testTwapSearchHandlesIndexWrapToZero() public {
+        oracle.updateFromPool(IPoolManager(address(manager)), key);
+        for (uint256 i = 0; i < 31; i++) {
+            vm.warp(block.timestamp + 1);
+            oracle.updateFromPool(IPoolManager(address(manager)), key);
+        }
+        uint160 twap = oracle.getTwapSqrtPriceX96(key, 600);
         require(twap != 0);
     }
 }

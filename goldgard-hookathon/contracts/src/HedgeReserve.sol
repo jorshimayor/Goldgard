@@ -30,6 +30,11 @@ contract HedgeReserve is Ownable2Step {
     error OracleDeviationTooHigh(uint256 deviationBps);
 
     event ReserveBalanceChanged(
+        uint256 newBalance,
+        int256 delta,
+        address indexed triggeredBy
+    );
+    event ReserveBalanceChangedDetailed(
         address indexed token,
         uint256 newBalance,
         int256 delta,
@@ -68,8 +73,13 @@ contract HedgeReserve is Ownable2Step {
         uint256 beforeBal = IERC20(token).balanceOf(address(this));
         IERC20(token).safeTransfer(to, amount);
         uint256 afterBal = IERC20(token).balanceOf(address(this));
-        emit ReserveBalanceChanged(
+        emit ReserveBalanceChangedDetailed(
             token,
+            afterBal,
+            int256(afterBal) - int256(beforeBal),
+            msg.sender
+        );
+        emit ReserveBalanceChanged(
             afterBal,
             int256(afterBal) - int256(beforeBal),
             msg.sender
@@ -103,14 +113,19 @@ contract HedgeReserve is Ownable2Step {
 
         uint256 after0 = IERC20(token0).balanceOf(address(this));
         uint256 after1 = IERC20(token1).balanceOf(address(this));
-        emit ReserveBalanceChanged(
+        emit ReserveBalanceChangedDetailed(
             token0,
             after0,
             int256(after0) - int256(before0),
             msg.sender
         );
-        emit ReserveBalanceChanged(
+        emit ReserveBalanceChangedDetailed(
             token1,
+            after1,
+            int256(after1) - int256(before1),
+            msg.sender
+        );
+        emit ReserveBalanceChanged(
             after1,
             int256(after1) - int256(before1),
             msg.sender
@@ -144,14 +159,19 @@ contract HedgeReserve is Ownable2Step {
 
         uint256 after0 = IERC20(token0).balanceOf(address(this));
         uint256 after1 = IERC20(token1).balanceOf(address(this));
-        emit ReserveBalanceChanged(
+        emit ReserveBalanceChangedDetailed(
             token0,
             after0,
             int256(after0) - int256(before0),
             msg.sender
         );
-        emit ReserveBalanceChanged(
+        emit ReserveBalanceChangedDetailed(
             token1,
+            after1,
+            int256(after1) - int256(before1),
+            msg.sender
+        );
+        emit ReserveBalanceChanged(
             after1,
             int256(after1) - int256(before1),
             msg.sender

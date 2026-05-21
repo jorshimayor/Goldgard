@@ -22,6 +22,12 @@ import {IChainlinkAggregatorV3} from "../src/interfaces/IChainlinkAggregatorV3.s
 import {MockAggregatorV3} from "./mocks/MockAggregatorV3.sol";
 
 contract HedgeReserveTest is Test {
+    event ReserveBalanceChanged(
+        uint256 newBalance,
+        int256 delta,
+        address indexed triggeredBy
+    );
+
     PoolManager internal manager;
     PoolModifyLiquidityTestNoChecks internal liqRouter;
     SwapRouterNoChecks internal swapRouter;
@@ -139,5 +145,51 @@ contract HedgeReserveTest is Test {
     function testSetMaxSpotOracleDeviationBpsRejectsOverBps() public {
         vm.expectRevert(HedgeReserve.BadConfig.selector);
         hedge.setMaxSpotOracleDeviationBps(0);
+    }
+
+    function testFundHookEmitsReserveBalanceChanged() public {
+        uint256 beforeBal = token0.balanceOf(address(hedge));
+        uint256 amount = 1e18;
+
+        vm.expectEmit(true, false, false, true);
+        emit ReserveBalanceChanged(beforeBal - amount, -int256(amount), address(this));
+
+        hedge.fundHook(key.currency0, amount, address(this));
+    }
+
+    function testConvertRevertsWhenInsufficientLiquidityToken1Out() public {
+        deal(address(token1), address(hedge), 0);
+        token0.mint(address(this), 10e18);
+        token0.approve(address(hedge), type(uint256).max);
+
+        vm.expectRevert(HedgeReserve.InsufficientLiquidity.selector);
+        hedge.convertToken0ToToken1(key, 1e18, 0);
+    }
+
+    function testConvertRevertsWhenInsufficientLiquidityToken0Out() public {
+        deal(address(token0), address(hedge), 0);
+        token1.mint(address(this), 10e18);
+        token1.approve(address(hedge), type(uint256).max);
+
+        vm.expectRevert(HedgeReserve.InsufficientLiquidity.selector);
+        hedge.convertToken1ToToken0(key, 1e18, 0);
+    }
+
+    function testDeprecatedRebalanceFunctionsRevert() public {
+        vm.expectRevert(bytes("deprecated"));
+        hedge.rebalanceExactToken1Out(
+            IPoolManager(address(manager)),
+            key,
+            0,
+            0
+        );
+
+        vm.expectRevert(bytes("deprecated"));
+        hedge.rebalanceExactToken0Out(
+            IPoolManager(address(manager)),
+            key,
+            0,
+            0
+        );
     }
 }

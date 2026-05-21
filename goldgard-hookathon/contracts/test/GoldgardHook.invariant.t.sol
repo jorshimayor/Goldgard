@@ -31,6 +31,7 @@ import {SafetyModule} from "../src/SafetyModule.sol";
 import {IGoldgardClaimsView} from "../src/SafetyModule.sol";
 import {HedgeReserve} from "../src/HedgeReserve.sol";
 import {RewardDistributor} from "../src/RewardDistributor.sol";
+import {GoldgardCallbackReceiver} from "../src/GoldgardCallbackReceiver.sol";
 import {
     IChainlinkAggregatorV3
 } from "../src/interfaces/IChainlinkAggregatorV3.sol";
@@ -115,6 +116,7 @@ contract GoldgardHookInvariantTest is StdInvariant, Test {
     RewardDistributor internal rewards;
     GoldgardHook internal hook;
     PoolKey internal key;
+    GoldgardCallbackReceiver internal receiver;
 
     GoldgardHandler internal handler;
     uint256 internal safetyAssetsAtStart;
@@ -175,6 +177,15 @@ contract GoldgardHookInvariantTest is StdInvariant, Test {
         safety.setClaimsView(IGoldgardClaimsView(address(hook)));
         hedge.setHook(address(hook));
         rewards.setHook(address(hook));
+
+        receiver = new GoldgardCallbackReceiver(
+            address(this),
+            address(0xCA11),
+            address(hook),
+            address(safety)
+        );
+        hook.setAuthorizedCaller(address(receiver));
+        safety.setAuthorizedCaller(address(receiver));
 
         agg = new MockAggregatorV3(8, 1e8);
         OracleAdapter.PoolOracleConfig memory oCfg = OracleAdapter
@@ -240,5 +251,24 @@ contract GoldgardHookInvariantTest is StdInvariant, Test {
     function invariant_hookDoesNotAccumulateTokenBalances() public view {
         require(token0.balanceOf(address(hook)) == 0);
         require(token1.balanceOf(address(hook)) == 0);
+    }
+
+    function invariant_reactiveCallbackCannotBeBypassed() public {
+        address attacker = address(0xBEEF);
+        vm.prank(attacker);
+        vm.expectRevert(GoldgardHook.OnlyAuthorized.selector);
+        hook.setAlertLevel(1);
+
+        vm.prank(attacker);
+        vm.expectRevert(GoldgardHook.OnlyAuthorized.selector);
+        hook.setPremiumRate(10);
+
+        vm.prank(attacker);
+        vm.expectRevert(GoldgardHook.OnlyAuthorized.selector);
+        hook.setRebalanceThreshold(1);
+
+        vm.prank(attacker);
+        vm.expectRevert(SafetyModule.OnlyAuthorized.selector);
+        safety.epochCheckpoint();
     }
 }

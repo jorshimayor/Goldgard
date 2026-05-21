@@ -25,6 +25,7 @@ import {OracleAdapter} from "../src/OracleAdapter.sol";
 import {SafetyModule} from "../src/SafetyModule.sol";
 import {HedgeReserve} from "../src/HedgeReserve.sol";
 import {RewardDistributor} from "../src/RewardDistributor.sol";
+import {GoldgardCallbackReceiver} from "../src/GoldgardCallbackReceiver.sol";
 import {IChainlinkAggregatorV3} from "../src/interfaces/IChainlinkAggregatorV3.sol";
 import {MockAggregatorV3} from "../src/mocks/MockAggregatorV3.sol";
 import {IGoldgardClaimsView} from "../src/SafetyModule.sol";
@@ -59,8 +60,34 @@ contract DeployDemo is Script {
     using LPFeeLibrary for uint24;
 
     function run() external {
+        address deployer = _startBroadcast();
+        _deployCore(deployer);
+        hook = _deployHookCreate2(deployer, manager, oracle, safety, hedge, rewards);
+        _wireDependencies(deployer);
+        _initPoolAndLiquidity(deployer);
+        _writeConfig(deployer);
+        vm.stopBroadcast();
+    }
+
+    PoolManager internal manager;
+    StateView internal stateView;
+    MockERC20 internal token0;
+    MockERC20 internal token1;
+    MockAggregatorV3 internal agg;
+    OracleAdapter internal oracle;
+    SafetyModule internal safety;
+    HedgeReserve internal hedge;
+    RewardDistributor internal rewards;
+    GoldgardHook internal hook;
+    GoldgardCallbackReceiver internal callbackReceiver;
+    PoolModifyLiquidityTestNoChecks internal liqRouter;
+    SwapRouterNoChecks internal swapRouter;
+    PoolKey internal key;
+    int24 internal lower;
+    int24 internal upper;
+
+    function _startBroadcast() internal returns (address deployer) {
         uint256 pk = _privateKeyOrZero();
-        address deployer;
         if (pk != 0) {
             deployer = vm.addr(pk);
             vm.startBroadcast(pk);
@@ -68,17 +95,17 @@ contract DeployDemo is Script {
             vm.startBroadcast();
             deployer = tx.origin;
         }
+    }
 
-        PoolManager manager = new PoolManager(deployer);
-        StateView stateView = new StateView(IUniPoolManager(address(manager)));
+    function _deployCore(address deployer) internal {
+        manager = new PoolManager(deployer);
+        stateView = new StateView(IUniPoolManager(address(manager)));
 
         uint64 nonce = vm.getNonce(deployer);
         address predicted0 = vm.computeCreateAddress(deployer, uint256(nonce));
         address predicted1 = vm.computeCreateAddress(deployer, uint256(nonce) + 1);
         bool lstFirst = predicted0 < predicted1;
 
-        MockERC20 token0;
-        MockERC20 token1;
         if (lstFirst) {
             token0 = new MockERC20("LST", "LST", 18);
             token1 = new MockERC20("USDC", "USDC", 18);
@@ -90,12 +117,16 @@ contract DeployDemo is Script {
         token0.mint(deployer, 1_000_000e18);
         token1.mint(deployer, 1_000_000e18);
 
-        MockAggregatorV3 agg = new MockAggregatorV3(8, 1e8);
-
-        OracleAdapter oracle = new OracleAdapter(deployer);
-        SafetyModule safety = new SafetyModule(deployer, IERC20(address(token1)), "Goldgard Safety Vault", "gSAFE");
-        HedgeReserve hedge = new HedgeReserve(deployer, IPoolManager(address(manager)), oracle);
-        RewardDistributor rewards = new RewardDistributor(deployer);
+        agg = new MockAggregatorV3(8, 1e8);
+        oracle = new OracleAdapter(deployer);
+        safety = new SafetyModule(
+            deployer,
+            IERC20(address(token1)),
+            "Goldgard Safety Vault",
+            "gSAFE"
+        );
+        hedge = new HedgeReserve(deployer, IPoolManager(address(manager)), oracle);
+        rewards = new RewardDistributor(deployer);
 
         uint256 maxDevBps = vm.envOr(
             "MAX_SPOT_ORACLE_DEVIATION_BPS",
@@ -104,26 +135,31 @@ contract DeployDemo is Script {
         if (maxDevBps == 0) maxDevBps = 10_000;
         if (maxDevBps > type(uint16).max) maxDevBps = type(uint16).max;
         hedge.setMaxSpotOracleDeviationBps(uint16(maxDevBps));
+    }
 
-        uint160 requiredFlags = (uint160(1) << 10) | (uint160(1) << 8) | (uint160(1) << 7) | (uint160(1) << 6)
-            | (uint160(1) << 2);
-
-        bytes memory initCode = abi.encodePacked(
-            type(GoldgardHook).creationCode,
-            abi.encode(deployer, IPoolManager(address(manager)), oracle, safety, hedge, rewards)
-        );
-
-        (bytes32 salt, ) = _findSalt(keccak256(initCode), requiredFlags, 200_000);
-        GoldgardHook hook =
-            new GoldgardHook{salt: salt}(deployer, IPoolManager(address(manager)), oracle, safety, hedge, rewards);
-
+    function _wireDependencies(address deployer) internal {
         oracle.setHook(address(hook));
         safety.setHook(address(hook));
         safety.setClaimsView(IGoldgardClaimsView(address(hook)));
         hedge.setHook(address(hook));
         rewards.setHook(address(hook));
 
-        PoolKey memory key = PoolKey({
+        address reactiveCallbackProxy = vm.envOr(
+            "REACTIVE_CALLBACK_PROXY",
+            deployer
+        );
+        callbackReceiver = new GoldgardCallbackReceiver(
+            deployer,
+            reactiveCallbackProxy,
+            address(hook),
+            address(safety)
+        );
+        hook.setAuthorizedCaller(address(callbackReceiver));
+        safety.setAuthorizedCaller(address(callbackReceiver));
+    }
+
+    function _initPoolAndLiquidity(address deployer) internal {
+        key = PoolKey({
             currency0: Currency.wrap(address(token0)),
             currency1: Currency.wrap(address(token1)),
             fee: LPFeeLibrary.DYNAMIC_FEE_FLAG,
@@ -153,8 +189,8 @@ contract DeployDemo is Script {
 
         manager.initialize(key, TickMath.getSqrtPriceAtTick(0));
 
-        PoolModifyLiquidityTestNoChecks liqRouter = new PoolModifyLiquidityTestNoChecks(manager);
-        SwapRouterNoChecks swapRouter = new SwapRouterNoChecks(manager);
+        liqRouter = new PoolModifyLiquidityTestNoChecks(manager);
+        swapRouter = new SwapRouterNoChecks(manager);
 
         token0.approve(address(liqRouter), type(uint256).max);
         token1.approve(address(liqRouter), type(uint256).max);
@@ -164,19 +200,26 @@ contract DeployDemo is Script {
         token0.mint(address(hedge), 500_000e18);
         token1.mint(address(hedge), 500_000e18);
 
-        int24 lower = TickMath.minUsableTick(key.tickSpacing);
-        int24 upper = TickMath.maxUsableTick(key.tickSpacing);
+        lower = TickMath.minUsableTick(key.tickSpacing);
+        upper = TickMath.maxUsableTick(key.tickSpacing);
 
-        ModifyLiquidityParams memory lp =
-            ModifyLiquidityParams({tickLower: lower, tickUpper: upper, liquidityDelta: 10_000e18, salt: bytes32(0)});
+        ModifyLiquidityParams memory lp = ModifyLiquidityParams({
+            tickLower: lower,
+            tickUpper: upper,
+            liquidityDelta: 10_000e18,
+            salt: bytes32(0)
+        });
         liqRouter.modifyLiquidity(key, lp, abi.encodePacked(deployer));
+    }
 
+    function _writeConfig(address deployer) internal {
         string memory root = "demo";
         vm.serializeUint(root, "chainId", block.chainid);
         vm.serializeAddress(root, "deployer", deployer);
         vm.serializeAddress(root, "poolManager", address(manager));
         vm.serializeAddress(root, "stateView", address(stateView));
         vm.serializeAddress(root, "hook", address(hook));
+        vm.serializeAddress(root, "callbackReceiver", address(callbackReceiver));
         vm.serializeAddress(root, "oracleAdapter", address(oracle));
         vm.serializeAddress(root, "safetyModule", address(safety));
         vm.serializeAddress(root, "hedgeReserve", address(hedge));
@@ -186,14 +229,56 @@ contract DeployDemo is Script {
         vm.serializeAddress(root, "token0", address(token0));
         vm.serializeAddress(root, "token1", address(token1));
         vm.serializeAddress(root, "mockAggregator", address(agg));
-        vm.serializeUint(root, "tickSpacing", uint256(uint24(uint32(int32(key.tickSpacing)))));
+        vm.serializeUint(
+            root,
+            "tickSpacing",
+            uint256(uint24(uint32(int32(key.tickSpacing))))
+        );
         vm.serializeUint(root, "fee", uint256(key.fee));
         vm.serializeUint(root, "minTick", uint256(uint24(uint32(int32(lower)))));
-        string memory json = vm.serializeUint(root, "maxTick", uint256(uint24(uint32(int32(upper)))));
+        string memory json = vm.serializeUint(
+            root,
+            "maxTick",
+            uint256(uint24(uint32(int32(upper))))
+        );
 
-        vm.writeJson(json, "../frontend/app/config/demoConfig.local.json");
+        string memory outPath = block.chainid == 31337
+            ? "../frontend/app/config/demoConfig.local.json"
+            : "../frontend/app/config/demoConfig.sepolia.json";
+        vm.writeJson(json, outPath);
+    }
 
-        vm.stopBroadcast();
+    function _deployHookCreate2(
+        address deployer,
+        PoolManager manager_,
+        OracleAdapter oracle_,
+        SafetyModule safety_,
+        HedgeReserve hedge_,
+        RewardDistributor rewards_
+    ) internal returns (GoldgardHook hook_) {
+        uint160 requiredFlags = (uint160(1) << 10) |
+            (uint160(1) << 8) |
+            (uint160(1) << 7) |
+            (uint160(1) << 6) |
+            (uint160(1) << 2);
+
+        bytes32 initCodeHash = keccak256(
+            abi.encodePacked(
+                type(GoldgardHook).creationCode,
+                abi.encode(deployer, IPoolManager(address(manager_)), oracle_),
+                abi.encode(safety_, hedge_, rewards_)
+            )
+        );
+
+        (bytes32 salt, ) = _findSalt(initCodeHash, requiredFlags, 200_000);
+        hook_ = new GoldgardHook{salt: salt}(
+            deployer,
+            IPoolManager(address(manager_)),
+            oracle_,
+            safety_,
+            hedge_,
+            rewards_
+        );
     }
 
     function _findSalt(

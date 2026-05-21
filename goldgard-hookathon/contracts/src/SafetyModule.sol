@@ -33,6 +33,7 @@ contract SafetyModule is ERC4626, Ownable2Step {
     error BadConfig();
     error OnlyHook();
     error OnlyReactiveCallbackProxy();
+    error OnlyAuthorized();
     error ClaimPending();
     error CooldownNotPassed();
     error ClaimsPaused();
@@ -62,6 +63,11 @@ contract SafetyModule is ERC4626, Ownable2Step {
     event ClaimsViewChanged(address indexed claimsView);
     event ClaimPaid(
         address indexed lp,
+        uint256 amount,
+        uint256 reservePostBalance
+    );
+    event ClaimPaidForPool(
+        address indexed lp,
         PoolId indexed poolId,
         uint256 amount,
         uint256 reservePostBalance
@@ -74,10 +80,12 @@ contract SafetyModule is ERC4626, Ownable2Step {
         uint256 payoutOut
     );
     event ReactiveCallbackProxySet(address indexed proxy);
+    event AuthorizedCallerSet(address indexed caller);
 
     mapping(address => mapping(PoolId => uint64)) public claimRequestedAt;
 
     address public reactiveCallbackProxy;
+    address public authorizedCaller;
     uint64 public epochId;
     uint64 public epochStartedAt;
     uint256 public epochPremiumIn;
@@ -99,6 +107,11 @@ contract SafetyModule is ERC4626, Ownable2Step {
         _;
     }
 
+    modifier onlyAuthorized() {
+        if (msg.sender != authorizedCaller) revert OnlyAuthorized();
+        _;
+    }
+
     function setHook(address _hook) external onlyOwner {
         hook = _hook;
     }
@@ -108,6 +121,12 @@ contract SafetyModule is ERC4626, Ownable2Step {
         if (reactiveCallbackProxy != address(0)) revert BadConfig();
         reactiveCallbackProxy = proxy;
         emit ReactiveCallbackProxySet(proxy);
+    }
+
+    function setAuthorizedCaller(address caller) external onlyOwner {
+        if (caller == address(0)) revert BadConfig();
+        authorizedCaller = caller;
+        emit AuthorizedCallerSet(caller);
     }
 
     function setClaimsView(IGoldgardClaimsView _claimsView) external onlyOwner {
@@ -195,10 +214,11 @@ contract SafetyModule is ERC4626, Ownable2Step {
 
         epochPayoutOut += payoutAssets;
         uint256 reservePostBalance = IERC20(asset()).balanceOf(address(this));
-        emit ClaimPaid(msg.sender, poolId, payoutAssets, reservePostBalance);
+        emit ClaimPaid(msg.sender, payoutAssets, reservePostBalance);
+        emit ClaimPaidForPool(msg.sender, poolId, payoutAssets, reservePostBalance);
     }
 
-    function epochCheckpoint() external onlyReactiveCallbackProxy {
+    function epochCheckpoint() external onlyAuthorized {
         uint64 end = uint64(block.timestamp);
         emit EpochCheckpointed(
             epochId,
