@@ -7,7 +7,7 @@
   "hook": "0xEB81D83C3315425aeCC9E112d99fb6b23c04c5c4",
   "liquidityRouter": "0x4A679253410272dd5232B3Ff7cF5dbB88f295319",
   "maxTick": 887220,
-  "minTick": 15889996,
+  "minTick": -887220,
   "mockAggregator": "0x0165878A594ca255338adfa4d48449f69242Eb8F",
   "oracleAdapter": "0xa513E6E4b8f2a923D98304ec87F64353C4D5C853",
   "poolManager": "0x5FbDB2315678afecb367f032d93F642f64180aa3",

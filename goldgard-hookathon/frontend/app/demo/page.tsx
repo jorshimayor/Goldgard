@@ -152,7 +152,11 @@ export default function DemoConsolePage() {
         {!okConfig ? (
           <div className="mb-6 rounded-xl border border-gg-border/50 bg-aged-gold/5 p-4 text-sm text-gg-muted">
             <p className="font-semibold text-foreground mb-1">Demo config not configured</p>
-            Deploy locally and regenerate <Data as="code">app/config/demoConfig.local.json</Data>.
+            Deploy and regenerate{" "}
+            <Data as="code">
+              {cfg.chainId === 11155111 ? "app/config/demoConfig.sepolia.json" : "app/config/demoConfig.local.json"}
+            </Data>
+            .
           </div>
         ) : null}
 

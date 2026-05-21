@@ -239,12 +239,8 @@ contract DeployDemo is Script {
             uint256(uint24(uint32(int32(key.tickSpacing))))
         );
         vm.serializeUint(root, "fee", uint256(key.fee));
-        vm.serializeUint(root, "minTick", uint256(uint24(uint32(int32(lower)))));
-        string memory json = vm.serializeUint(
-            root,
-            "maxTick",
-            uint256(uint24(uint32(int32(upper))))
-        );
+        vm.serializeInt(root, "minTick", int256(lower));
+        string memory json = vm.serializeInt(root, "maxTick", int256(upper));
 
         string memory outPath = block.chainid == 31337
             ? "../frontend/app/config/demoConfig.local.json"
