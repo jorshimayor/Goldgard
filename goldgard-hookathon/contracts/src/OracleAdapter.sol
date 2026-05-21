@@ -25,6 +25,13 @@ contract OracleAdapter is Ownable2Step {
     error BadConfig();
     error OracleUnavailable();
 
+    event OraclePriceUpdated(
+        uint256 twap,
+        uint256 external_,
+        uint256 deviationBps,
+        uint256 timestamp
+    );
+
     uint8 internal constant OBSERVATION_CARDINALITY = 32;
     uint32 public constant MIN_TWAP_WINDOW_SECONDS = 10 minutes;
 
@@ -122,12 +129,26 @@ contract OracleAdapter is Ownable2Step {
         if (i == OBSERVATION_CARDINALITY) i = 0;
         st.index = i;
         if (st.cardinality < OBSERVATION_CARDINALITY) st.cardinality++;
+
+        (uint160 clSqrtPriceX96, bool ok) = getChainlinkSqrtPriceX96(key);
+        if (ok && clSqrtPriceX96 != 0) {
+            uint160 twapSqrtPriceX96 = getTwapSqrtPriceX96(
+                key,
+                MIN_TWAP_WINDOW_SECONDS
+            );
+            if (twapSqrtPriceX96 != 0) {
+                uint256 twap = _price1e18FromSqrt(twapSqrtPriceX96);
+                uint256 external_ = _price1e18FromSqrt(clSqrtPriceX96);
+                uint256 deviationBps = _deviationBps256(twap, external_);
+                emit OraclePriceUpdated(twap, external_, deviationBps, block.timestamp);
+            }
+        }
     }
 
     function getTwapSqrtPriceX96(
         PoolKey calldata key,
         uint32 windowSeconds
-    ) external view returns (uint160) {
+    ) public view returns (uint160) {
         PoolId poolId = key.toId();
         PoolState memory st = poolState[poolId];
         if (st.lastUpdated == 0) return 0;
@@ -163,7 +184,7 @@ contract OracleAdapter is Ownable2Step {
 
     function getChainlinkSqrtPriceX96(
         PoolKey calldata key
-    ) external view returns (uint160 sqrtPriceX96, bool ok) {
+    ) public view returns (uint160 sqrtPriceX96, bool ok) {
         PoolOracleConfig memory cfg = poolOracle[key.toId()];
         if (address(cfg.aggregator) == address(0)) return (0, false);
 
@@ -218,10 +239,10 @@ contract OracleAdapter is Ownable2Step {
         PoolKey calldata key,
         uint32 twapWindowSeconds
     ) external view returns (uint256 price1e18) {
-        (uint160 cl, bool ok) = this.getChainlinkSqrtPriceX96(key);
+        (uint160 cl, bool ok) = getChainlinkSqrtPriceX96(key);
         uint160 sqrtPriceX96 = ok
             ? cl
-            : this.getTwapSqrtPriceX96(key, twapWindowSeconds);
+            : getTwapSqrtPriceX96(key, twapWindowSeconds);
         if (sqrtPriceX96 == 0) return 0;
         uint256 price = Math.mulDiv(
             uint256(sqrtPriceX96),
@@ -234,7 +255,7 @@ contract OracleAdapter is Ownable2Step {
     function getPrice1e18Strict(
         PoolKey calldata key
     ) external view returns (uint256 price1e18) {
-        (uint160 cl, bool ok) = this.getChainlinkSqrtPriceX96(key);
+        (uint160 cl, bool ok) = getChainlinkSqrtPriceX96(key);
         if (!ok || cl == 0) revert OracleUnavailable();
         uint256 price = Math.mulDiv(
             uint256(cl),
@@ -297,5 +318,22 @@ contract OracleAdapter is Ownable2Step {
             ts = o.timestamp;
             cumulative = o.sqrtPriceX96Cumulative;
         }
+    }
+
+    function _deviationBps256(uint256 a, uint256 b) internal pure returns (uint256) {
+        if (a == b) return 0;
+        uint256 hi = a > b ? a : b;
+        uint256 lo = a > b ? b : a;
+        if (lo == 0) return type(uint256).max;
+        return ((hi - lo) * 10_000) / lo;
+    }
+
+    function _price1e18FromSqrt(uint160 sqrtPriceX96) internal pure returns (uint256) {
+        uint256 price = Math.mulDiv(
+            uint256(sqrtPriceX96),
+            uint256(sqrtPriceX96),
+            uint256(1) << 192
+        );
+        return Math.mulDiv(price, 1e18, 1);
     }
 }

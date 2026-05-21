@@ -29,6 +29,13 @@ contract HedgeReserve is Ownable2Step {
     error InsufficientLiquidity();
     error OracleDeviationTooHigh(uint256 deviationBps);
 
+    event ReserveBalanceChanged(
+        address indexed token,
+        uint256 newBalance,
+        int256 delta,
+        address indexed triggeredBy
+    );
+
     address public hook;
     OracleAdapter public immutable oracle;
     IPoolManager public immutable manager;
@@ -57,7 +64,16 @@ contract HedgeReserve is Ownable2Step {
 
     function fundHook(Currency currency, uint256 amount, address to) external {
         if (msg.sender != hook) revert OnlyHook();
-        IERC20(Currency.unwrap(currency)).safeTransfer(to, amount);
+        address token = Currency.unwrap(currency);
+        uint256 beforeBal = IERC20(token).balanceOf(address(this));
+        IERC20(token).safeTransfer(to, amount);
+        uint256 afterBal = IERC20(token).balanceOf(address(this));
+        emit ReserveBalanceChanged(
+            token,
+            afterBal,
+            int256(afterBal) - int256(beforeBal),
+            msg.sender
+        );
     }
 
     function convertToken0ToToken1(
@@ -71,6 +87,11 @@ contract HedgeReserve is Ownable2Step {
         _checkSpotDeviation(key, p);
         amount1Out = Math.mulDiv(amount0In, p, 1e18);
 
+        address token0 = Currency.unwrap(key.currency0);
+        address token1 = Currency.unwrap(key.currency1);
+        uint256 before0 = IERC20(token0).balanceOf(address(this));
+        uint256 before1 = IERC20(token1).balanceOf(address(this));
+
         IERC20(Currency.unwrap(key.currency0)).safeTransferFrom(
             msg.sender,
             address(this),
@@ -79,6 +100,21 @@ contract HedgeReserve is Ownable2Step {
         if (key.currency1.balanceOfSelf() < amount1Out)
             revert InsufficientLiquidity();
         key.currency1.transfer(msg.sender, amount1Out);
+
+        uint256 after0 = IERC20(token0).balanceOf(address(this));
+        uint256 after1 = IERC20(token1).balanceOf(address(this));
+        emit ReserveBalanceChanged(
+            token0,
+            after0,
+            int256(after0) - int256(before0),
+            msg.sender
+        );
+        emit ReserveBalanceChanged(
+            token1,
+            after1,
+            int256(after1) - int256(before1),
+            msg.sender
+        );
     }
 
     function convertToken1ToToken0(
@@ -92,6 +128,11 @@ contract HedgeReserve is Ownable2Step {
         _checkSpotDeviation(key, p);
         amount0Out = Math.mulDiv(amount1In, 1e18, p);
 
+        address token0 = Currency.unwrap(key.currency0);
+        address token1 = Currency.unwrap(key.currency1);
+        uint256 before0 = IERC20(token0).balanceOf(address(this));
+        uint256 before1 = IERC20(token1).balanceOf(address(this));
+
         IERC20(Currency.unwrap(key.currency1)).safeTransferFrom(
             msg.sender,
             address(this),
@@ -100,6 +141,21 @@ contract HedgeReserve is Ownable2Step {
         if (key.currency0.balanceOfSelf() < amount0Out)
             revert InsufficientLiquidity();
         key.currency0.transfer(msg.sender, amount0Out);
+
+        uint256 after0 = IERC20(token0).balanceOf(address(this));
+        uint256 after1 = IERC20(token1).balanceOf(address(this));
+        emit ReserveBalanceChanged(
+            token0,
+            after0,
+            int256(after0) - int256(before0),
+            msg.sender
+        );
+        emit ReserveBalanceChanged(
+            token1,
+            after1,
+            int256(after1) - int256(before1),
+            msg.sender
+        );
     }
 
     function rebalanceExactToken1Out(

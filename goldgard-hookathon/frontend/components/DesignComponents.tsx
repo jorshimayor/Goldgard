@@ -145,23 +145,19 @@ export const Body = React.forwardRef<HTMLParagraphElement, BodyProps>(
 
 Body.displayName = 'Body';
 
-interface DataProps extends React.HTMLAttributes<HTMLSpanElement> {
+interface DataProps extends React.HTMLAttributes<HTMLElement> {
   children: React.ReactNode;
   as?: 'span' | 'code' | 'div';
 }
 
-export const Data = React.forwardRef<HTMLSpanElement, DataProps>(
-  ({ children, as = 'span', className = '', ...props }, ref) => {
-    const Comp = as as any;
-    return (
-      <Comp ref={ref} className={`text-data ${className}`} {...props}>
-        {children}
-      </Comp>
-    );
-  }
-);
-
-Data.displayName = 'Data';
+export const Data: React.FC<DataProps> = ({ children, as = 'span', className = '', ...props }) => {
+  const Comp = as;
+  return (
+    <Comp className={`text-data ${className}`} {...props}>
+      {children}
+    </Comp>
+  );
+};
 
 /* ============================================================
    GRID COMPONENT WITH KNOTWORK

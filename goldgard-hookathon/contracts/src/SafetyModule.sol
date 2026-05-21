@@ -32,6 +32,7 @@ contract SafetyModule is ERC4626, Ownable2Step {
 
     error BadConfig();
     error OnlyHook();
+    error OnlyReactiveCallbackProxy();
     error ClaimPending();
     error CooldownNotPassed();
     error ClaimsPaused();
@@ -59,8 +60,28 @@ contract SafetyModule is ERC4626, Ownable2Step {
     event ClaimsViewDelaySet(uint64 delaySeconds);
     event ClaimsViewChangeScheduled(address indexed pending, uint64 validAt);
     event ClaimsViewChanged(address indexed claimsView);
+    event ClaimPaid(
+        address indexed lp,
+        PoolId indexed poolId,
+        uint256 amount,
+        uint256 reservePostBalance
+    );
+    event EpochCheckpointed(
+        uint64 indexed epochId,
+        uint64 epochStartedAt,
+        uint64 epochEndedAt,
+        uint256 premiumIn,
+        uint256 payoutOut
+    );
+    event ReactiveCallbackProxySet(address indexed proxy);
 
     mapping(address => mapping(PoolId => uint64)) public claimRequestedAt;
+
+    address public reactiveCallbackProxy;
+    uint64 public epochId;
+    uint64 public epochStartedAt;
+    uint256 public epochPremiumIn;
+    uint256 public epochPayoutOut;
 
     constructor(
         address _owner,
@@ -70,10 +91,23 @@ contract SafetyModule is ERC4626, Ownable2Step {
     ) ERC20(name_, symbol_) ERC4626(_asset) Ownable(_owner) {
         cooldownSeconds = DEFAULT_COOLDOWN_SECONDS;
         claimsViewChangeDelay = 2 days;
+        epochStartedAt = uint64(block.timestamp);
+    }
+
+    modifier onlyReactiveCallbackProxy() {
+        if (msg.sender != reactiveCallbackProxy) revert OnlyReactiveCallbackProxy();
+        _;
     }
 
     function setHook(address _hook) external onlyOwner {
         hook = _hook;
+    }
+
+    function setReactiveCallbackProxy(address proxy) external onlyOwner {
+        if (proxy == address(0)) revert BadConfig();
+        if (reactiveCallbackProxy != address(0)) revert BadConfig();
+        reactiveCallbackProxy = proxy;
+        emit ReactiveCallbackProxySet(proxy);
     }
 
     function setClaimsView(IGoldgardClaimsView _claimsView) external onlyOwner {
@@ -130,6 +164,7 @@ contract SafetyModule is ERC4626, Ownable2Step {
     ) external returns (uint256 sharesMinted) {
         if (msg.sender != hook) revert OnlyHook();
         sharesMinted = deposit(amount, address(this));
+        epochPremiumIn += amount;
     }
 
     function requestClaim(PoolId poolId) external {
@@ -157,5 +192,24 @@ contract SafetyModule is ERC4626, Ownable2Step {
         claimRequestedAt[msg.sender][poolId] = 0;
         uint256 shares = previewWithdraw(payoutAssets);
         _withdraw(address(this), msg.sender, address(this), payoutAssets, shares);
+
+        epochPayoutOut += payoutAssets;
+        uint256 reservePostBalance = IERC20(asset()).balanceOf(address(this));
+        emit ClaimPaid(msg.sender, poolId, payoutAssets, reservePostBalance);
+    }
+
+    function epochCheckpoint() external onlyReactiveCallbackProxy {
+        uint64 end = uint64(block.timestamp);
+        emit EpochCheckpointed(
+            epochId,
+            epochStartedAt,
+            end,
+            epochPremiumIn,
+            epochPayoutOut
+        );
+        epochId += 1;
+        epochStartedAt = end;
+        epochPremiumIn = 0;
+        epochPayoutOut = 0;
     }
 }

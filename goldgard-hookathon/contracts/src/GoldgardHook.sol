@@ -60,6 +60,8 @@ contract GoldgardHook is BaseHook, Ownable2Step, IUnlockCallback {
     error OracleUnavailable();
     error OracleDeviationTooHigh(uint256 deviationBps);
     error InvalidFee(uint24 fee);
+    error OnlyReactiveCallbackProxy();
+    error BadConfig();
 
     event CircuitBreakerTripped(
         PoolId indexed poolId,
@@ -90,9 +92,29 @@ contract GoldgardHook is BaseHook, Ownable2Step, IUnlockCallback {
         address indexed owner,
         uint128 liquidity
     );
+    event OraclePriceUpdated(
+        uint256 twap,
+        uint256 external_,
+        uint256 deviationBps,
+        uint256 timestamp
+    );
+    event PremiumDiverted(
+        PoolId indexed poolId,
+        address indexed payer,
+        Currency feeCurrency,
+        uint256 feeAmount,
+        uint256 usdcDeposited,
+        uint16 premiumBps
+    );
+    event AlertLevelRaised(uint8 level, uint64 until);
+    event RebalanceThresholdTightened(uint256 newThreshold);
+    event PremiumRateAdjusted(uint16 newPremiumBps);
+    event ReactiveCallbackProxySet(address indexed proxy);
 
     uint256 public constant BPS = 10_000;
     uint256 public constant PREMIUM_BPS = 2;
+    uint16 internal constant MAX_PREMIUM_BPS = 100;
+    uint64 internal constant ALERT_TTL_SECONDS = 30 minutes;
 
     bytes32 internal constant TS_REBALANCE_IN_PROGRESS =
         keccak256("GGARD/rebalance/inProgress");
@@ -135,6 +157,11 @@ contract GoldgardHook is BaseHook, Ownable2Step, IUnlockCallback {
     mapping(PoolId => uint256) public pendingToken0In;
     mapping(PoolId => uint256) public pendingToken1In;
 
+    address public reactiveCallbackProxy;
+    uint256 public reactiveAlert;
+    uint256 public minRebalanceAmountIn;
+    uint16 public premiumBps;
+
     constructor(
         address _owner,
         IPoolManager _manager,
@@ -147,6 +174,7 @@ contract GoldgardHook is BaseHook, Ownable2Step, IUnlockCallback {
         safetyModule = _safetyModule;
         hedgeReserve = _hedgeReserve;
         rewards = _rewards;
+        premiumBps = uint16(PREMIUM_BPS);
 
         Hooks.Permissions memory perms;
         perms.afterAddLiquidity = true;
@@ -157,6 +185,41 @@ contract GoldgardHook is BaseHook, Ownable2Step, IUnlockCallback {
         perms.afterAddLiquidityReturnDelta = false;
         perms.afterRemoveLiquidityReturnDelta = false;
         Hooks.validateHookPermissions(this, perms);
+    }
+
+    modifier onlyReactiveCallbackProxy() {
+        if (msg.sender != reactiveCallbackProxy) revert OnlyReactiveCallbackProxy();
+        _;
+    }
+
+    function setReactiveCallbackProxy(address proxy) external onlyOwner {
+        if (proxy == address(0)) revert BadConfig();
+        if (reactiveCallbackProxy != address(0)) revert BadConfig();
+        reactiveCallbackProxy = proxy;
+        emit ReactiveCallbackProxySet(proxy);
+    }
+
+    function getReactiveAlert() external view returns (uint8 level, uint64 until) {
+        uint256 packed = reactiveAlert;
+        level = uint8(packed);
+        until = uint64(packed >> 8);
+    }
+
+    function raiseAlertLevel(uint8 level) external onlyReactiveCallbackProxy {
+        uint64 until = uint64(block.timestamp + ALERT_TTL_SECONDS);
+        reactiveAlert = (uint256(until) << 8) | uint256(level);
+        emit AlertLevelRaised(level, until);
+    }
+
+    function tightenRebalanceThreshold(uint256 newThreshold) external onlyReactiveCallbackProxy {
+        minRebalanceAmountIn = newThreshold;
+        emit RebalanceThresholdTightened(newThreshold);
+    }
+
+    function adjustPremiumRate(uint256 newRateBps) external onlyReactiveCallbackProxy {
+        if (newRateBps > MAX_PREMIUM_BPS) revert BadConfig();
+        premiumBps = OZSafeCast.toUint16(newRateBps);
+        emit PremiumRateAdjusted(premiumBps);
     }
 
     function setPoolConfig(
@@ -188,21 +251,25 @@ contract GoldgardHook is BaseHook, Ownable2Step, IUnlockCallback {
         oracle.updateFromPool(manager, key);
 
         (uint160 spotSqrtPriceX96, , , ) = manager.getSlot0(poolId);
-        (uint160 oracleSqrtPriceX96, bool ok) = oracle.getChainlinkSqrtPriceX96(
-            key
+        (uint160 clSqrtPriceX96, bool ok) = oracle.getChainlinkSqrtPriceX96(key);
+        uint160 twapSqrtPriceX96 = oracle.getTwapSqrtPriceX96(
+            key,
+            cfg.twapWindowSeconds
         );
-        if (!ok) {
-            oracleSqrtPriceX96 = oracle.getTwapSqrtPriceX96(
-                key,
-                cfg.twapWindowSeconds
-            );
-        }
+        uint160 oracleSqrtPriceX96 = ok ? clSqrtPriceX96 : twapSqrtPriceX96;
         if (oracleSqrtPriceX96 == 0) revert OracleUnavailable();
 
         uint256 deviationBps = _deviationBps(
             spotSqrtPriceX96,
             oracleSqrtPriceX96
         );
+
+        if (clSqrtPriceX96 != 0 && twapSqrtPriceX96 != 0) {
+            uint256 twap = _price1e18FromSqrt(twapSqrtPriceX96);
+            uint256 external_ = _price1e18FromSqrt(clSqrtPriceX96);
+            uint256 oracleDeviationBps = _deviationBps256(twap, external_);
+            emit OraclePriceUpdated(twap, external_, oracleDeviationBps, block.timestamp);
+        }
 
         if (deviationBps > cfg.circuitBreakerBps) {
             uint64 until = uint64(
@@ -213,9 +280,18 @@ contract GoldgardHook is BaseHook, Ownable2Step, IUnlockCallback {
             revert OracleDeviationTooHigh(deviationBps);
         }
 
+        uint8 alertLevel = uint8(reactiveAlert);
+        uint64 alertUntil = uint64(reactiveAlert >> 8);
+        bool alertActive = alertLevel != 0 && uint64(block.timestamp) < alertUntil;
+        uint256 feeDeviationBps = deviationBps;
+        if (alertActive) {
+            uint256 bump = alertLevel >= 2 ? 500 : 300;
+            feeDeviationBps = Math.max(feeDeviationBps, uint256(cfg.deviationBps) + bump);
+        }
+
         uint24 dynFee = cfg.baseLpFee;
-        if (deviationBps > cfg.deviationBps) {
-            uint256 extra = (deviationBps - cfg.deviationBps) *
+        if (feeDeviationBps > cfg.deviationBps) {
+            uint256 extra = (feeDeviationBps - cfg.deviationBps) *
                 uint256(cfg.feeSlopeBps);
             uint256 candidate = uint256(cfg.baseLpFee) + extra;
             if (candidate > cfg.maxLpFee) candidate = cfg.maxLpFee;
@@ -251,7 +327,7 @@ contract GoldgardHook is BaseHook, Ownable2Step, IUnlockCallback {
 
         if (swapAmount < 0) swapAmount = -swapAmount;
         uint256 swapAmountAbs = OZSafeCast.toUint256(int256(swapAmount));
-        uint256 premium = (swapAmountAbs * PREMIUM_BPS) / BPS;
+        uint256 premium = (swapAmountAbs * uint256(premiumBps)) / BPS;
         if (premium == 0) return (GoldgardHook.afterSwap.selector, 0);
 
         manager.take(feeCurrency, address(this), premium);
@@ -300,6 +376,7 @@ contract GoldgardHook is BaseHook, Ownable2Step, IUnlockCallback {
         uint256 reward = usdcDeposited / 100;
         if (reward > 0) rewards.mintReward(sender, reward);
 
+        emit PremiumDiverted(poolId, sender, feeCurrency, premium, usdcDeposited, premiumBps);
         emit PremiumTaken(poolId, feeCurrency, premium, usdcDeposited);
         return (GoldgardHook.afterSwap.selector, premium.toInt128());
     }
@@ -493,6 +570,7 @@ contract GoldgardHook is BaseHook, Ownable2Step, IUnlockCallback {
             : pendingToken1In[poolId];
         uint256 amountIn = pending;
         if (maxAmountIn != 0 && amountIn > maxAmountIn) amountIn = maxAmountIn;
+        if (minRebalanceAmountIn != 0 && amountIn < minRebalanceAmountIn) return 0;
         if (amountIn == 0) return 0;
 
         bytes memory ret = manager.unlock(abi.encode(key, zeroForOne, amountIn));
@@ -626,6 +704,23 @@ contract GoldgardHook is BaseHook, Ownable2Step, IUnlockCallback {
         uint256 hi = a > b ? a : b;
         uint256 lo = a > b ? b : a;
         return ((hi - lo) * BPS) / lo;
+    }
+
+    function _deviationBps256(uint256 a, uint256 b) internal pure returns (uint256) {
+        if (a == b) return 0;
+        uint256 hi = a > b ? a : b;
+        uint256 lo = a > b ? b : a;
+        if (lo == 0) return type(uint256).max;
+        return ((hi - lo) * BPS) / lo;
+    }
+
+    function _price1e18FromSqrt(uint160 sqrtPriceX96) internal pure returns (uint256) {
+        uint256 price = Math.mulDiv(
+            uint256(sqrtPriceX96),
+            uint256(sqrtPriceX96),
+            uint256(1) << 192
+        );
+        return Math.mulDiv(price, 1e18, 1);
     }
 
     function _impermanentLossBps(

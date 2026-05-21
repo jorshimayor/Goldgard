@@ -1,8 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import Link from "next/link";
-import { ArrowRight, BarChart3, Coins, Flame, ShieldCheck, TrendingDown } from "lucide-react";
+import { useMemo } from "react";
+import { BarChart3, Coins, ShieldCheck, TrendingDown } from "lucide-react";
 import { Display, Subhead, Body, Data, RuneStone, LeverageRune, Beacon, ForgedLines } from "@/components/DesignComponents";
 import {
   Area,
@@ -13,13 +12,13 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { useAccount, useChainId, useReadContract } from "wagmi";
+import { useChainId, useReadContract } from "wagmi";
 import { formatUnits } from "viem";
 
 import { getDemoConfigForChain, isConfiguredAddress } from "../../lib/demoConfig";
-import { formatNumber, shortAddr } from "../../lib/format";
+import { formatNumber } from "../../lib/format";
+import { goldgardHookAbi } from "../../lib/abi/goldgardHook";
 import { safetyModuleAbi } from "../../lib/abi/safetyModule";
-import { rewardDistributorAbi } from "../../lib/abi/rewardDistributor";
 
 type Point = {
   step: number;
@@ -91,15 +90,7 @@ function IlTooltip({ active, payload }: { active?: boolean; payload?: Array<{ pa
 export default function DashboardPage() {
   const chainId = useChainId();
   const cfg = useMemo(() => getDemoConfigForChain(chainId), [chainId]);
-  const { address } = useAccount();
-  const [simMoveBps, setSimMoveBps] = useState(1000);
-  const [simBusy, setSimBusy] = useState(false);
-  const [simLog, setSimLog] = useState<string | null>(null);
-
-  const ggardArgs = useMemo(() => {
-    if (!address) return null;
-    return [address, 1n] as const;
-  }, [address]);
+  const simMoveBps = 1000;
 
   const { data: safetyAssets } = useReadContract({
     abi: safetyModuleAbi,
@@ -108,20 +99,16 @@ export default function DashboardPage() {
     query: { enabled: isConfiguredAddress(cfg.safetyModule) },
   });
 
-  const { data: ggardId } = useReadContract({
-    abi: rewardDistributorAbi,
-    address: isConfiguredAddress(cfg.rewards) ? (cfg.rewards as `0x${string}`) : undefined,
-    functionName: "GGARD_ID",
-    query: { enabled: isConfiguredAddress(cfg.rewards) },
+  const { data: reactiveAlert } = useReadContract({
+    abi: goldgardHookAbi,
+    address: isConfiguredAddress(cfg.hook) ? (cfg.hook as `0x${string}`) : undefined,
+    functionName: "getReactiveAlert",
+    query: { enabled: isConfiguredAddress(cfg.hook) },
   });
 
-  const { data: ggardBalance } = useReadContract({
-    abi: rewardDistributorAbi,
-    address: isConfiguredAddress(cfg.rewards) ? (cfg.rewards as `0x${string}`) : undefined,
-    functionName: "balanceOf",
-    args: address && ggardId !== undefined ? ([address, ggardId] as const) : ggardArgs!,
-    query: { enabled: Boolean(address && ggardId !== undefined && isConfiguredAddress(cfg.rewards)) },
-  });
+  const alertLevel = reactiveAlert?.[0] ?? 0;
+  const alertUntil = reactiveAlert?.[1] ?? 0n;
+  const alertActive = alertLevel > 0 && BigInt(Math.floor(Date.now() / 1000)) < alertUntil;
 
   const chartData = useMemo<Point[]>(() => {
     const steps = 12;
@@ -156,8 +143,6 @@ export default function DashboardPage() {
     return { yMin, yMax: Math.max(2, yMax) };
   }, [chartData]);
 
-  const networkLabel = cfg.chainId === 11155111 ? "Sepolia" : cfg.chainId === 31337 ? "Local" : `Chain ${cfg.chainId}`;
-
   return (
     <div className="min-h-screen bg-gg-bg px-4 py-10 sm:py-16">
       <div className="mx-auto w-full max-w-7xl">
@@ -165,12 +150,37 @@ export default function DashboardPage() {
           <Display variant="xl" className="mb-2">
             Shieldwall
           </Display>
-          <Display variant="lg" className="gradient-text mb-6">
-            Dashboard
-          </Display>
           <Body className="text-gg-muted text-lg">
             Monitor your protected liquidity and safety module performance
           </Body>
+          <div className="mt-6 flex items-center gap-4 flex-wrap">
+            <div
+              className={[
+                "relative h-10 w-10 rounded-xl border bg-gg-surface/40 backdrop-blur-sm grid place-items-center",
+                alertActive
+                  ? "border-aged-gold/60 shadow-[0_0_0_1px_rgba(212,175,119,0.25),0_0_40px_rgba(212,175,119,0.22)]"
+                  : "border-gg-border/60",
+              ].join(" ")}
+            >
+              <span
+                className={[
+                  "text-lg font-semibold select-none",
+                  alertActive ? "text-aged-gold animate-pulse" : "text-gg-muted",
+                ].join(" ")}
+              >
+                ᚱ
+              </span>
+            </div>
+            <div className="min-w-[12rem]">
+              <div className="text-xs font-semibold text-gg-muted uppercase tracking-wider">Reactive Sentinel</div>
+              <div className={alertActive ? "text-aged-gold font-semibold" : "text-gg-muted font-semibold"}>
+                {alertActive ? `Alert level ${alertLevel}` : "Quiet"}
+              </div>
+            </div>
+            <div className="ml-auto">
+              <Beacon status={alertActive ? "warning" : "active"} label={alertActive ? "Pre-warmed" : "Normal"} />
+            </div>
+          </div>
         </div>
 
         <div className="grid gap-8 md:grid-cols-12">

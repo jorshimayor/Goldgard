@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import { useAccount, useChainId, usePublicClient, useWriteContract } from "wagmi";
 import { parseUnits } from "viem";
 import { ArrowRight, CheckCircle2, CircleDashed, ExternalLink, Flame, Shield } from "lucide-react";
-import { Display, Subhead, Body, Data, RuneStone, LeverageRune, Beacon, KnotworkDivider } from "@/components/DesignComponents";
+import { Display, Subhead, Body, Data, RuneStone, LeverageRune } from "@/components/DesignComponents";
 
 import { getDemoConfigForChain, isConfiguredAddress } from "../../lib/demoConfig";
 import { mockErc20Abi } from "../../lib/abi/mockErc20";
@@ -140,9 +140,10 @@ export default function DemoConsolePage() {
           <Display variant="xl" className="mb-4">
             Demo Console
           </Display>
-          <Body className="text-gg-muted text-lg max-w-xl">
+          {/** <Body className="text-gg-muted text-lg max-w-xl">
             One transaction. The hook watches the oracle in <Data as="code">beforeSwap</Data>, takes a premium & rebalances in <Data as="code">afterSwap</Data>, then updates eligibility on liquidity events.
           </Body>
+          */}
         </div>
 
         {/* Config Warnings */}
@@ -258,7 +259,7 @@ export default function DemoConsolePage() {
                 disabled={!address || !okConfig || wrongNetwork || amountWei === 0n || busy}
                 onClick={execute}
               >
-                Execute <ArrowRight className="h-4 w-4" />
+                Execute
               </LeverageRune>
             </div>
 

@@ -28,7 +28,7 @@ export default function Home() {
               </div>
 
               <Body className="max-w-xl text-lg text-gg-muted">
-                Protect Thy Yield — The First Delta-Neutral LST Hook. Goldgard turns the LST LP trap into a defensible moat by coupling dynamic fees, oracle-aware circuit breaking, and an on-chain Safety Module funded by swap premiums.
+                Protect Thy Yield. Goldgard turns the LST LP trap into a defensible moat by coupling dynamic fees, oracle-aware circuit breaking, and an on-chain Safety Module funded by swap premiums.
               </Body>
 
               <div className="flex flex-col gap-4 sm:flex-row pt-4">
@@ -167,7 +167,7 @@ export default function Home() {
               Ready to Shield Your Yield?
             </Display>
             <Body className="mx-auto max-w-2xl text-lg text-gg-muted">
-              Join us in revolutionizing LST liquidity provision. Experience delta-neutral yield protection powered by Uniswap v4.
+              Join us in revolutionizing LST liquidity provision.
             </Body>
           </div>
 
