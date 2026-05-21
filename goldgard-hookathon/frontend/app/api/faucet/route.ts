@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { createPublicClient, createWalletClient, http, parseEther, parseUnits } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
-import { foundry } from "viem/chains";
 
 import { getDemoConfigForChain } from "../../../lib/demoConfig";
 import { mockErc20Abi } from "../../../lib/abi/mockErc20";
@@ -50,11 +49,12 @@ export async function POST(request: Request) {
   const account = privateKeyToAccount(pk);
   const transport = http(rpcUrl);
 
-  const publicClient = createPublicClient({ chain: foundry, transport });
-  const walletClient = createWalletClient({ account, chain: foundry, transport });
+  const publicClient = createPublicClient({ transport });
+  const walletClient = createWalletClient({ account, transport });
 
   try {
     const fundHash = await walletClient.sendTransaction({
+      chain: null,
       to,
       value: parseEther(ethAmount),
     });
@@ -62,6 +62,7 @@ export async function POST(request: Request) {
     const mintAmount = parseUnits(tokenAmount, 18);
 
     const mint0Hash = await walletClient.writeContract({
+      chain: null,
       abi: mockErc20Abi,
       address: token0,
       functionName: "mint",
@@ -69,6 +70,7 @@ export async function POST(request: Request) {
     });
 
     const mint1Hash = await walletClient.writeContract({
+      chain: null,
       abi: mockErc20Abi,
       address: token1,
       functionName: "mint",
@@ -91,4 +93,3 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: false, error: (e as Error).message }, { status: 500 });
   }
 }
-

@@ -1,8 +1,8 @@
 "use client";
 
-import { useMemo } from "react";
-import { BarChart3, Coins, ShieldCheck, TrendingDown } from "lucide-react";
-import { Display, Subhead, Body, Data, RuneStone, LeverageRune, Beacon, ForgedLines } from "@/components/DesignComponents";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { BarChart3, Coins, Network, ShieldCheck, Zap } from "lucide-react";
+import { Display, Subhead, Body, Data, RuneStone, Beacon, ForgedLines } from "@/components/DesignComponents";
 import {
   Area,
   AreaChart,
@@ -12,28 +12,18 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { useChainId, useReadContract } from "wagmi";
+import { useAccount, useBlockNumber, useChainId, useGasPrice, useReadContract, useSwitchChain } from "wagmi";
 import { formatUnits } from "viem";
 
 import { getDemoConfigForChain, isConfiguredAddress } from "../../lib/demoConfig";
 import { formatNumber } from "../../lib/format";
 import { goldgardHookAbi } from "../../lib/abi/goldgardHook";
 import { safetyModuleAbi } from "../../lib/abi/safetyModule";
+import { rewardDistributorAbi } from "../../lib/abi/rewardDistributor";
+import { erc20Abi } from "../../lib/abi/erc20";
+import { chainLabel, rpcWsUrl, supportedChains } from "../../lib/networks";
 
-type Point = {
-  step: number;
-  movePct: number;
-  ilBps: number;
-  protectedIlBps: number;
-  ilPct: number;
-  protectedIlPct: number;
-};
-
-function computeILBps(r: number) {
-  const sqrtR = Math.sqrt(r);
-  const factor = (2 * sqrtR) / (1 + r);
-  return Math.max(0, (1 - factor) * 10_000);
-}
+type SeriesPoint = { t: number; value: number };
 
 function formatDecimalString(value: string, maxFractionDigits: number) {
   const [rawInt, rawFrac = ""] = value.split(".");
@@ -45,103 +35,358 @@ function formatDecimalString(value: string, maxFractionDigits: number) {
   return `${withCommas}.${fracPart}`;
 }
 
-function formatTokenAmount(value: bigint | undefined, decimals = 18, maxFractionDigits = 4) {
-  if (value === undefined) return "—";
+function formatTokenAmount(value: bigint | undefined, decimals: number | undefined, maxFractionDigits = 4) {
+  if (value === undefined || decimals === undefined) return "—";
   return formatDecimalString(formatUnits(value, decimals), maxFractionDigits);
 }
 
-function IlTooltip({ active, payload }: { active?: boolean; payload?: Array<{ payload?: Point }> }) {
+function formatBigIntUnits(value: bigint | undefined) {
+  if (value === undefined) return "—";
+  const s = value.toString();
+  return s.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+}
+
+function SeriesTooltip({
+  active,
+  payload,
+}: {
+  active?: boolean;
+  payload?: Array<{ payload?: SeriesPoint }>;
+}) {
   const p = payload?.[0]?.payload;
   if (!active || !p) return null;
-
-  const unprotected = formatNumber(p.ilPct, { maximumFractionDigits: 2 });
-  const protectedIl = formatNumber(p.protectedIlPct, { maximumFractionDigits: 2 });
-  const savings = formatNumber(Math.max(0, p.ilPct - p.protectedIlPct), { maximumFractionDigits: 2 });
-
   return (
     <div className="rounded-xl border border-gg-border/60 bg-gg-bg/85 px-4 py-3 shadow-[0_0_0_1px_rgba(212,175,119,0.18),0_12px_30px_rgba(0,0,0,0.45)] backdrop-blur">
       <div className="text-xs font-semibold text-gg-muted mb-1">
-        Move: {formatNumber(p.movePct, { maximumFractionDigits: 1 })}%
+        {new Date(p.t).toLocaleTimeString()}
       </div>
-      <div className="space-y-1.5 text-sm">
-        <div className="flex items-center justify-between gap-6">
-          <div className="flex items-center gap-2">
-            <span className="h-2 w-2 rounded-full bg-gg-blood" />
-            <span className="text-gg-muted">Unprotected IL</span>
-          </div>
-          <span className="tabular-nums font-semibold text-foreground">{unprotected}%</span>
-        </div>
-        <div className="flex items-center justify-between gap-6">
-          <div className="flex items-center gap-2">
-            <span className="h-2 w-2 rounded-full bg-gg-gold" />
-            <span className="text-gg-muted">Protected IL</span>
-          </div>
-          <span className="tabular-nums font-semibold text-foreground">{protectedIl}%</span>
-        </div>
-        <div className="flex items-center justify-between gap-6 border-t border-gg-border/40 pt-2">
-          <span className="text-gg-muted">Savings</span>
-          <span className="tabular-nums font-semibold text-gg-gold">-{savings}%</span>
-        </div>
+      <div className="text-sm tabular-nums font-semibold text-foreground">
+        {formatNumber(p.value, { maximumFractionDigits: 4 })}
       </div>
     </div>
   );
 }
 
 export default function DashboardPage() {
-  const chainId = useChainId();
-  const cfg = useMemo(() => getDemoConfigForChain(chainId), [chainId]);
-  const simMoveBps = 1000;
+  const walletChainId = useChainId();
+  const [viewChainId, setViewChainId] = useState(walletChainId);
+  const cfg = useMemo(() => getDemoConfigForChain(viewChainId), [viewChainId]);
+  const { address, isConnected } = useAccount();
+  const { switchChain, isPending: switching } = useSwitchChain();
+
+  const [rpcHealthy, setRpcHealthy] = useState<boolean | null>(null);
+  const [rpcError, setRpcError] = useState<string | null>(null);
+  const healthTimer = useRef<number | null>(null);
+  const [wsHealthy, setWsHealthy] = useState<boolean | null>(null);
+  const [wsBlockNumber, setWsBlockNumber] = useState<bigint | null>(null);
+  const [syncStalled, setSyncStalled] = useState(false);
+  const lastBlockSeenAt = useRef<number | null>(null);
+
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem("gg:viewChainId");
+      const parsed = raw ? Number(raw) : NaN;
+      if (Number.isFinite(parsed)) {
+        setViewChainId(parsed);
+      } else {
+        setViewChainId(walletChainId);
+      }
+    } catch {
+      setViewChainId(walletChainId);
+    }
+  }, [walletChainId]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem("gg:viewChainId", String(viewChainId));
+    } catch {
+    }
+  }, [viewChainId]);
+
+  const { data: blockNumber } = useBlockNumber({
+    chainId: viewChainId,
+    watch: true,
+    query: { refetchInterval: 4_000 },
+  });
+
+  const { data: gasPrice } = useGasPrice({
+    chainId: viewChainId,
+    query: { refetchInterval: 5_000 },
+  });
+
+  const { data: safetyAsset } = useReadContract({
+    abi: safetyModuleAbi,
+    chainId: viewChainId,
+    address: isConfiguredAddress(cfg.safetyModule) ? (cfg.safetyModule as `0x${string}`) : undefined,
+    functionName: "asset",
+    query: { enabled: isConfiguredAddress(cfg.safetyModule), refetchInterval: 60_000 },
+  });
+
+  const { data: safetyAssetDecimals } = useReadContract({
+    abi: erc20Abi,
+    chainId: viewChainId,
+    address: safetyAsset ? (safetyAsset as `0x${string}`) : undefined,
+    functionName: "decimals",
+    query: { enabled: Boolean(safetyAsset), refetchInterval: 60_000 },
+  });
+
+  const { data: safetyAssetSymbol } = useReadContract({
+    abi: erc20Abi,
+    chainId: viewChainId,
+    address: safetyAsset ? (safetyAsset as `0x${string}`) : undefined,
+    functionName: "symbol",
+    query: { enabled: Boolean(safetyAsset), refetchInterval: 60_000 },
+  });
 
   const { data: safetyAssets } = useReadContract({
     abi: safetyModuleAbi,
+    chainId: viewChainId,
     address: isConfiguredAddress(cfg.safetyModule) ? (cfg.safetyModule as `0x${string}`) : undefined,
     functionName: "totalAssets",
-    query: { enabled: isConfiguredAddress(cfg.safetyModule) },
+    query: { enabled: isConfiguredAddress(cfg.safetyModule), refetchInterval: 4_000 },
   });
 
   const { data: reactiveAlert } = useReadContract({
     abi: goldgardHookAbi,
+    chainId: viewChainId,
     address: isConfiguredAddress(cfg.hook) ? (cfg.hook as `0x${string}`) : undefined,
     functionName: "getReactiveAlert",
-    query: { enabled: isConfiguredAddress(cfg.hook) },
+    query: { enabled: isConfiguredAddress(cfg.hook), refetchInterval: 4_000 },
+  });
+
+  const { data: premiumBps } = useReadContract({
+    abi: goldgardHookAbi,
+    chainId: viewChainId,
+    address: isConfiguredAddress(cfg.hook) ? (cfg.hook as `0x${string}`) : undefined,
+    functionName: "premiumBps",
+    query: { enabled: isConfiguredAddress(cfg.hook), refetchInterval: 5_000 },
+  });
+
+  const { data: coverageCapBps } = useReadContract({
+    abi: goldgardHookAbi,
+    chainId: viewChainId,
+    address: isConfiguredAddress(cfg.hook) ? (cfg.hook as `0x${string}`) : undefined,
+    functionName: "coverageCapBps",
+    query: { enabled: isConfiguredAddress(cfg.hook), refetchInterval: 5_000 },
+  });
+
+  const { data: ggardId } = useReadContract({
+    abi: rewardDistributorAbi,
+    chainId: viewChainId,
+    address: isConfiguredAddress(cfg.rewards) ? (cfg.rewards as `0x${string}`) : undefined,
+    functionName: "GGARD_ID",
+    query: { enabled: isConfiguredAddress(cfg.rewards), refetchInterval: 30_000 },
+  });
+
+  const { data: ggardBalance } = useReadContract({
+    abi: rewardDistributorAbi,
+    chainId: viewChainId,
+    address: isConfiguredAddress(cfg.rewards) ? (cfg.rewards as `0x${string}`) : undefined,
+    functionName: "balanceOf",
+    args: address && ggardId !== undefined ? [address, ggardId] : undefined,
+    query: { enabled: Boolean(address && ggardId !== undefined && isConfiguredAddress(cfg.rewards)), refetchInterval: 5_000 },
+  });
+
+  const { data: token0Decimals } = useReadContract({
+    abi: erc20Abi,
+    chainId: viewChainId,
+    address: isConfiguredAddress(cfg.token0) ? (cfg.token0 as `0x${string}`) : undefined,
+    functionName: "decimals",
+    query: { enabled: isConfiguredAddress(cfg.token0), refetchInterval: 60_000 },
+  });
+
+  const { data: token0Symbol } = useReadContract({
+    abi: erc20Abi,
+    chainId: viewChainId,
+    address: isConfiguredAddress(cfg.token0) ? (cfg.token0 as `0x${string}`) : undefined,
+    functionName: "symbol",
+    query: { enabled: isConfiguredAddress(cfg.token0), refetchInterval: 60_000 },
+  });
+
+  const { data: token0Balance } = useReadContract({
+    abi: erc20Abi,
+    chainId: viewChainId,
+    address: isConfiguredAddress(cfg.token0) ? (cfg.token0 as `0x${string}`) : undefined,
+    functionName: "balanceOf",
+    args: address ? [address] : undefined,
+    query: { enabled: Boolean(address && isConfiguredAddress(cfg.token0)), refetchInterval: 5_000 },
+  });
+
+  const { data: token1Decimals } = useReadContract({
+    abi: erc20Abi,
+    chainId: viewChainId,
+    address: isConfiguredAddress(cfg.token1) ? (cfg.token1 as `0x${string}`) : undefined,
+    functionName: "decimals",
+    query: { enabled: isConfiguredAddress(cfg.token1), refetchInterval: 60_000 },
+  });
+
+  const { data: token1Symbol } = useReadContract({
+    abi: erc20Abi,
+    chainId: viewChainId,
+    address: isConfiguredAddress(cfg.token1) ? (cfg.token1 as `0x${string}`) : undefined,
+    functionName: "symbol",
+    query: { enabled: isConfiguredAddress(cfg.token1), refetchInterval: 60_000 },
+  });
+
+  const { data: token1Balance } = useReadContract({
+    abi: erc20Abi,
+    chainId: viewChainId,
+    address: isConfiguredAddress(cfg.token1) ? (cfg.token1 as `0x${string}`) : undefined,
+    functionName: "balanceOf",
+    args: address ? [address] : undefined,
+    query: { enabled: Boolean(address && isConfiguredAddress(cfg.token1)), refetchInterval: 5_000 },
   });
 
   const alertLevel = reactiveAlert?.[0] ?? 0;
   const alertUntil = reactiveAlert?.[1] ?? 0n;
   const alertActive = alertLevel > 0 && BigInt(Math.floor(Date.now() / 1000)) < alertUntil;
 
-  const chartData = useMemo<Point[]>(() => {
-    const steps = 12;
-    const dir = 1;
-    const points: Point[] = [];
-    for (let i = 0; i <= steps; i++) {
-      const move = (simMoveBps * i) / steps;
-      const r = 1 + (dir * move) / 10_000;
-      const ilBps = computeILBps(r);
-      const protectedIlBps = Math.max(0, ilBps - 350);
-      points.push({
-        step: i,
-        movePct: move / 100,
-        ilBps,
-        protectedIlBps,
-        ilPct: ilBps / 100,
-        protectedIlPct: protectedIlBps / 100,
-      });
-    }
-    return points;
-  }, [simMoveBps]);
+  const [series, setSeries] = useState<SeriesPoint[]>([]);
+  useEffect(() => {
+    if (safetyAssets === undefined) return;
+    if (safetyAssetDecimals === undefined) return;
+    const now = Date.now();
+    const val = Number(formatUnits(safetyAssets, safetyAssetDecimals));
+    setSeries((prev) => {
+      const next = [...prev, { t: now, value: val }];
+      const cutoff = now - 10 * 60 * 1000;
+      return next.filter((p) => p.t >= cutoff);
+    });
+  }, [safetyAssets, safetyAssetDecimals]);
 
-  const chartExtents = useMemo(() => {
-    let max = 0;
-    for (const p of chartData) {
-      max = Math.max(max, p.ilPct, p.protectedIlPct);
+  useEffect(() => {
+    async function checkHealth() {
+      try {
+        const res = await fetch(`/api/rpc/${viewChainId}`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_chainId", params: [] }),
+          cache: "no-store",
+        });
+        const json = (await res.json()) as { result?: string; error?: { message?: string } };
+        if (!res.ok) throw new Error(json.error?.message ?? "RPC error");
+        const got = Number.parseInt(String(json.result ?? "0x0"), 16);
+        if (got !== viewChainId) throw new Error(`RPC returned chainId ${got}`);
+        setRpcHealthy(true);
+        setRpcError(null);
+        try {
+          const b = await fetch(`/api/rpc/${viewChainId}`, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_blockNumber", params: [] }),
+            cache: "no-store",
+          });
+          const bj = (await b.json()) as { result?: string; error?: { message?: string } };
+          if (!b.ok) throw new Error(bj.error?.message ?? "RPC error");
+          if (typeof bj.result !== "string" || !bj.result.startsWith("0x")) throw new Error("RPC bad blockNumber");
+          lastBlockSeenAt.current = Date.now();
+          setSyncStalled(false);
+        } catch (e) {
+          setSyncStalled(true);
+          setRpcError((e as Error).message);
+        }
+      } catch (e) {
+        setRpcHealthy(false);
+        setRpcError((e as Error).message);
+      }
     }
-    if (!Number.isFinite(max)) return { yMin: 0, yMax: 12 };
-    const pad = Math.max(0.6, max * 0.22);
-    const yMin = 0;
-    const yMax = Math.ceil((max + pad) * 2) / 2;
-    return { yMin, yMax: Math.max(2, yMax) };
-  }, [chartData]);
+
+    void checkHealth();
+    if (healthTimer.current) window.clearInterval(healthTimer.current);
+    healthTimer.current = window.setInterval(() => void checkHealth(), 10_000);
+    return () => {
+      if (healthTimer.current) window.clearInterval(healthTimer.current);
+      healthTimer.current = null;
+    };
+  }, [viewChainId]);
+
+  useEffect(() => {
+    const bn = wsBlockNumber ?? blockNumber;
+    if (bn === undefined || bn === null) return;
+    lastBlockSeenAt.current = Date.now();
+    setSyncStalled(false);
+  }, [blockNumber, wsBlockNumber]);
+
+  useEffect(() => {
+    const t = window.setInterval(() => {
+      if (rpcHealthy === false) return;
+      if (!lastBlockSeenAt.current) return;
+      if (Date.now() - lastBlockSeenAt.current > 30_000) setSyncStalled(true);
+    }, 5_000);
+    return () => window.clearInterval(t);
+  }, [rpcHealthy]);
+
+  useEffect(() => {
+    const url = rpcWsUrl(viewChainId);
+    if (!url) {
+      setWsHealthy(null);
+      setWsBlockNumber(null);
+      return;
+    }
+
+    let socket: WebSocket | null = null;
+    let alive = true;
+    let subscribeId: string | null = null;
+
+    try {
+      socket = new WebSocket(url);
+    } catch {
+      setWsHealthy(false);
+      return;
+    }
+
+    socket.onopen = () => {
+      if (!alive || !socket) return;
+      setWsHealthy(true);
+      socket.send(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_subscribe", params: ["newHeads"] }));
+    };
+
+    socket.onmessage = (ev) => {
+      if (!alive) return;
+      try {
+        const msg = JSON.parse(String(ev.data)) as {
+          id?: number;
+          result?: string;
+          params?: { subscription?: string; result?: { number?: string } };
+        };
+        if (msg.id === 1 && typeof msg.result === "string") {
+          subscribeId = msg.result;
+          return;
+        }
+        const hex = msg.params?.result?.number;
+        if (typeof hex === "string" && hex.startsWith("0x")) {
+          setWsBlockNumber(BigInt(hex));
+        }
+      } catch {
+      }
+    };
+
+    socket.onerror = () => {
+      if (!alive) return;
+      setWsHealthy(false);
+    };
+
+    socket.onclose = () => {
+      if (!alive) return;
+      setWsHealthy(false);
+    };
+
+    return () => {
+      alive = false;
+      try {
+        if (socket && subscribeId) {
+          socket.send(JSON.stringify({ jsonrpc: "2.0", id: 2, method: "eth_unsubscribe", params: [subscribeId] }));
+        }
+      } catch {
+      }
+      try {
+        socket?.close();
+      } catch {
+      }
+    };
+  }, [viewChainId]);
+
+  const walletMismatch = isConnected && walletChainId !== viewChainId;
 
   return (
     <div className="min-h-screen bg-gg-bg px-4 py-10 sm:py-16">
@@ -151,9 +396,47 @@ export default function DashboardPage() {
             Shieldwall
           </Display>
           <Body className="text-gg-muted text-lg">
-            Monitor your protected liquidity and safety module performance
+            Live network telemetry and protocol status
           </Body>
           <div className="mt-6 flex items-center gap-4 flex-wrap">
+            <div className="flex items-center gap-2 rounded-xl border border-gg-border/60 bg-gg-surface/40 px-3 py-2 backdrop-blur-sm">
+              <Network className="h-4 w-4 text-aged-gold" />
+              <select
+                className="bg-transparent text-sm font-semibold text-foreground outline-none"
+                value={viewChainId}
+                data-testid="network-select"
+                onChange={(e) => {
+                  const next = Number(e.target.value);
+                  setViewChainId(next);
+                  if (isConnected) switchChain({ chainId: next });
+                }}
+                disabled={switching}
+              >
+                {supportedChains.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {chainLabel(c.id)}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <Beacon
+              data-testid="rpc-status"
+              status={rpcHealthy === false || syncStalled ? "warning" : "active"}
+              label={rpcHealthy === false ? "RPC degraded" : syncStalled ? "Sync stalled" : "RPC ok"}
+            />
+            {wsHealthy !== null ? (
+              <Beacon
+                data-testid="ws-status"
+                status={wsHealthy ? "active" : "warning"}
+                label={wsHealthy ? "WS ok" : "WS off"}
+              />
+            ) : null}
+            {walletMismatch ? <Beacon data-testid="wallet-mismatch" status="warning" label="Wallet mismatch" /> : null}
+            {rpcError ? (
+              <Data className="text-xs text-ember-red">{rpcError}</Data>
+            ) : null}
+
             <div
               className={[
                 "relative h-10 w-10 rounded-xl border bg-gg-surface/40 backdrop-blur-sm grid place-items-center",
@@ -177,8 +460,19 @@ export default function DashboardPage() {
                 {alertActive ? `Alert level ${alertLevel}` : "Quiet"}
               </div>
             </div>
-            <div className="ml-auto">
-              <Beacon status={alertActive ? "warning" : "active"} label={alertActive ? "Pre-warmed" : "Normal"} />
+            <div className="ml-auto flex items-center gap-3">
+              <Data className="text-xs text-gg-muted">
+                block{" "}
+                <span className="text-foreground tabular-nums" data-testid="block-number">
+                  {wsBlockNumber ?? blockNumber ?? "—"}
+                </span>
+              </Data>
+              <div className="flex items-center gap-2">
+                <Zap className="h-4 w-4 text-aged-gold" />
+                <Data className="text-xs tabular-nums">
+                  {gasPrice !== undefined ? `${formatDecimalString(formatUnits(gasPrice, 9), 2)} gwei` : "—"}
+                </Data>
+              </div>
             </div>
           </div>
         </div>
@@ -192,14 +486,14 @@ export default function DashboardPage() {
                   <div className="p-2 rounded-lg bg-aged-gold/20">
                     <ShieldCheck className="h-5 w-5 text-aged-gold" />
                   </div>
-                  <span className="text-xs font-semibold text-gg-muted uppercase tracking-wider">Goldgard Pool TVL</span>
+                  <span className="text-xs font-semibold text-gg-muted uppercase tracking-wider">SafetyModule Assets</span>
                 </div>
                 <div className="mt-4">
                   <div className="text-display text-aged-gold tabular-nums">
-                    {formatTokenAmount(safetyAssets, 18, 2)}M
+                    {formatTokenAmount(safetyAssets, safetyAssetDecimals, 4)}
                   </div>
                   <div className="mt-2 text-xs text-runic-green">
-                    +{formatTokenAmount(safetyAssets, 18, 2)} • last 24h
+                    {safetyAssetSymbol ? `live (${safetyAssetSymbol})` : "live"}
                   </div>
                 </div>
               </RuneStone>
@@ -209,14 +503,14 @@ export default function DashboardPage() {
                   <div className="p-2 rounded-lg bg-aged-gold/20">
                     <Coins className="h-5 w-5 text-aged-gold" />
                   </div>
-                  <span className="text-xs font-semibold text-gg-muted uppercase tracking-wider">Safety Module Balance</span>
+                  <span className="text-xs font-semibold text-gg-muted uppercase tracking-wider">GGARD Balance</span>
                 </div>
                 <div className="mt-4">
                   <div className="text-display text-aged-gold tabular-nums">
-                    ${formatTokenAmount(safetyAssets, 18, 3)}
+                    {formatBigIntUnits(ggardBalance)}
                   </div>
                   <div className="mt-2 text-xs text-gg-muted">
-                    premium accrued (24h)
+                    connected wallet (raw units)
                   </div>
                 </div>
               </RuneStone>
@@ -224,16 +518,20 @@ export default function DashboardPage() {
               <RuneStone>
                 <div className="flex items-center gap-3 mb-4">
                   <div className="p-2 rounded-lg bg-aged-gold/20">
-                    <TrendingDown className="h-5 w-5 text-aged-gold" />
+                    <BarChart3 className="h-5 w-5 text-aged-gold" />
                   </div>
-                  <span className="text-xs font-semibold text-gg-muted uppercase tracking-wider">Total IL Insured</span>
+                  <span className="text-xs font-semibold text-gg-muted uppercase tracking-wider">Policy Params</span>
                 </div>
                 <div className="mt-4">
-                  <div className="text-display text-aged-gold tabular-nums">
-                    $11,940
-                  </div>
-                  <div className="mt-2 text-xs text-gg-muted">
-                    3 claims paid • avg payout $3,980
+                  <div className="space-y-2 text-sm">
+                    <div className="flex items-center justify-between gap-4">
+                      <Data className="text-gg-muted">premiumBps</Data>
+                      <Data className="tabular-nums">{premiumBps !== undefined ? String(premiumBps) : "—"}</Data>
+                    </div>
+                    <div className="flex items-center justify-between gap-4">
+                      <Data className="text-gg-muted">coverageCapBps</Data>
+                      <Data className="tabular-nums">{coverageCapBps !== undefined ? String(coverageCapBps) : "—"}</Data>
+                    </div>
                   </div>
                 </div>
               </RuneStone>
@@ -247,30 +545,25 @@ export default function DashboardPage() {
                     <BarChart3 className="h-4 w-4" />
                     <span className="font-semibold">IL Comparison</span>
                   </div>
-                  <Display variant="lg" className="mt-2">Pool Value Through Simulated 10% Price Swing</Display>
+                  <Display variant="lg" className="mt-2">SafetyModule Assets (Live)</Display>
                 </div>
                 <Beacon status="active" label="Live" />
               </div>
 
               <Body className="text-gg-muted">
-                vETH / USDC pool · 30-minute window · 1,000 swap synthetic stress test
+                Rolling in-memory time series from on-chain reads (updates ≤ 5s)
               </Body>
 
               <ForgedLines />
 
               <div className="h-[22rem] sm:h-96 rounded-xl border border-gg-border/50 bg-gg-surface/30 p-4 backdrop-blur-sm">
                 <ResponsiveContainer width="100%" height="100%">
-                  <AreaChart data={chartData} margin={{ left: 8, right: 8, top: 12, bottom: 8 }}>
+                  <AreaChart data={series} margin={{ left: 8, right: 8, top: 12, bottom: 8 }}>
                     <defs>
                       <linearGradient id="ggGoldFill" x1="0" y1="0" x2="0" y2="1">
                         <stop offset="0%" stopColor="#D4AF77" stopOpacity={0.28} />
                         <stop offset="60%" stopColor="#D4AF77" stopOpacity={0.06} />
                         <stop offset="100%" stopColor="#D4AF77" stopOpacity={0} />
-                      </linearGradient>
-                      <linearGradient id="ggPaleGoldFill" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0%" stopColor="#F2DB9F" stopOpacity={0.26} />
-                        <stop offset="60%" stopColor="#F2DB9F" stopOpacity={0.05} />
-                        <stop offset="100%" stopColor="#F2DB9F" stopOpacity={0} />
                       </linearGradient>
                       <filter id="ggGlow" x="-50%" y="-50%" width="200%" height="200%">
                         <feGaussianBlur stdDeviation="3" result="blur" />
@@ -283,24 +576,23 @@ export default function DashboardPage() {
 
                     <CartesianGrid stroke="rgba(232,238,248,0.06)" strokeDasharray="3 6" vertical={false} />
                     <XAxis
-                      dataKey="movePct"
+                      dataKey="t"
                       tick={{ fill: "rgba(245,227,166,0.85)", fontSize: 12 }}
                       tickLine={false}
                       axisLine={false}
-                      tickFormatter={(v) => `${formatNumber(Number(v), { maximumFractionDigits: 1 })}%`}
+                      tickFormatter={(v) => new Date(Number(v)).toLocaleTimeString()}
                     />
                     <YAxis
-                      domain={[chartExtents.yMin, chartExtents.yMax]}
                       tick={{ fill: "rgba(245,227,166,0.85)", fontSize: 12 }}
                       tickLine={false}
                       axisLine={false}
-                      tickFormatter={(v) => `${formatNumber(Number(v), { maximumFractionDigits: 1 })}%`}
+                      tickFormatter={(v) => formatNumber(Number(v), { maximumFractionDigits: 3 })}
                       width={56}
                     />
-                    <Tooltip content={<IlTooltip />} cursor={{ stroke: "rgba(212,175,119,0.35)", strokeWidth: 1 }} />
+                    <Tooltip content={<SeriesTooltip />} cursor={{ stroke: "rgba(212,175,119,0.35)", strokeWidth: 1 }} />
                     <Area
                       type="monotone"
-                      dataKey="ilPct"
+                      dataKey="value"
                       stroke="#d4af77"
                       strokeWidth={2.5}
                       fill="url(#ggGoldFill)"
@@ -311,102 +603,48 @@ export default function DashboardPage() {
                       activeDot={{ r: 5, stroke: "rgba(245,227,166,0.35)", strokeWidth: 8, fill: "#0B0602" }}
                       style={{ filter: "url(#ggGlow)" }}
                     />
-                    <Area
-                      type="monotone"
-                      dataKey="protectedIlPct"
-                      stroke="#F2DB9F"
-                      strokeWidth={2.5}
-                      fill="url(#ggPaleGoldFill)"
-                      fillOpacity={1}
-                      isAnimationActive
-                      animationDuration={650}
-                      dot={false}
-                      activeDot={{ r: 5, stroke: "rgba(245,227,166,0.35)", strokeWidth: 8, fill: "#0B0602" }}
-                      style={{ filter: "url(#ggGlow)" }}
-                    />
                   </AreaChart>
                 </ResponsiveContainer>
-              </div>
-
-              {/* Chart Legend */}
-              <div className="grid gap-6 md:grid-cols-2 pt-4 border-t border-gg-border/30">
-                <div>
-                  <Data className="block mb-3 text-gg-muted uppercase text-xs">Goldgard LP</Data>
-                  <div className="text-display text-aged-gold">${formatNumber(964290, { maximumFractionDigits: 0 })}</div>
-                  <div className="mt-1 text-xs text-runic-green">$1,001,420 (99.86%)</div>
-                </div>
-                <div>
-                  <Data className="block mb-3 text-gg-muted uppercase text-xs">Control LP (Vanilla V4)</Data>
-                  <div className="text-display text-cold-steel">${formatNumber(964290, { maximumFractionDigits: 0 })}</div>
-                  <div className="mt-1 text-xs text-ember-red">(96.4% · -3.57% IL)</div>
-                </div>
               </div>
             </div>
           </section>
 
           {/* Sidebar */}
           <aside className="md:col-span-4 space-y-6">
-            {/* Active Position */}
+            {/* Wallet */}
             <RuneStone>
               <div className="flex items-center justify-between mb-4">
-                <Subhead className="text-lg">Active Position</Subhead>
-                <Beacon status="active" label="Position #418" />
+                <Subhead className="text-lg">Wallet</Subhead>
+                <Beacon status={address ? "active" : "warning"} label={address ? "Connected" : "Not connected"} />
               </div>
 
               <div className="space-y-4 mt-6">
-                <div>
-                  <Data className="text-gg-muted block mb-2">vETH / USDC · tick range -400 to +400</Data>
-                </div>
-                
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <Data className="text-gg-muted block mb-1 text-xs">Current value</Data>
-                    <div className="text-lg font-bold text-aged-gold">$48,210.72</div>
-                  </div>
-                  <div>
-                    <Data className="text-gg-muted block mb-1 text-xs">HODL value</Data>
-                    <div className="text-lg font-bold text-gg-muted">$48,278.10</div>
-                  </div>
+                <div className="space-y-2">
+                  <Data className="text-gg-muted block mb-1 text-xs">Address</Data>
+                  <Data as="code" className="break-all">{address ?? "—"}</Data>
                 </div>
 
                 <ForgedLines />
 
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <Data className="text-gg-muted block mb-1 text-xs">In-range</Data>
-                    <div className="text-lg font-bold">94.6%</div>
+                    <Data className="text-gg-muted block mb-1 text-xs">
+                      {token0Symbol ? `${token0Symbol} balance` : "token0 balance"}
+                    </Data>
+                    <div className="text-lg font-bold text-aged-gold tabular-nums">
+                      {formatTokenAmount(token0Balance, token0Decimals, 4)}
+                    </div>
                   </div>
                   <div>
-                    <Data className="text-gg-muted block mb-1 text-xs">vETH staking yield</Data>
-                    <div className="flex items-baseline gap-2">
-                      <span className="text-lg font-bold text-runic-green">+ 3.42%</span>
-                      <span className="text-xs text-gg-muted">APR</span>
+                    <Data className="text-gg-muted block mb-1 text-xs">
+                      {token1Symbol ? `${token1Symbol} balance` : "token1 balance"}
+                    </Data>
+                    <div className="text-lg font-bold text-aged-gold tabular-nums">
+                      {formatTokenAmount(token1Balance, token1Decimals, 4)}
                     </div>
                   </div>
                 </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <Data className="text-gg-muted block mb-1 text-xs">Swap fees accrued</Data>
-                    <div className="text-lg font-bold text-aged-gold">$182.14</div>
-                  </div>
-                  <div>
-                    <Data className="text-gg-muted block mb-1 text-xs">GGARD claimable</Data>
-                    <div className="text-lg font-bold">1,420.18</div>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="col-span-2">
-                    <Data className="text-gg-muted block mb-1 text-xs">Coverage cap</Data>
-                    <div className="text-lg font-bold text-aged-gold">$964.20</div>
-                  </div>
-                </div>
               </div>
-
-              <LeverageRune className="w-full mt-6 justify-center">
-                Withdraw + Claim
-              </LeverageRune>
             </RuneStone>
           </aside>
         </div>

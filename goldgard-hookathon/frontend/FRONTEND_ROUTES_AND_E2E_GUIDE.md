@@ -15,9 +15,10 @@
   - Stat tiles (SafetyModule total assets, reward balances, etc.)
   - “Reactive Sentinel” rune indicator:
     - Reads GoldgardHook.getReactiveAlert() and renders a glowing rune while active.
-  - IL visualization chart (simulation curve; not an on-chain chart).
+  - Live time-series chart (in-memory rolling series from on-chain reads; refresh ≤ 5s).
 - Contract reads:
   - SafetyModule.totalAssets()
+  - SafetyModule.asset() → ERC20.decimals()/symbol() (for correct unit formatting)
   - RewardDistributor.GGARD_ID + balanceOf(address,id)
   - GoldgardHook.getReactiveAlert()
 - Contract writes:
@@ -38,10 +39,19 @@
 ## 2) How the Frontend Connects to Contracts
 
 ### Config selection (local vs sepolia)
-- Frontend selects config based on connected chainId:
+- Frontend selects config based on the active chainId:
   - Local: `app/config/demoConfig.local.json`
   - Sepolia: `app/config/demoConfig.sepolia.json`
 - Source: [demoConfig.ts](file:///home/jorel/Goldgard/goldgard-hookathon/frontend/lib/demoConfig.ts)
+
+### RPC routing (mainnet/testnet/anvil) and secret handling
+- Client-side reads/writes use wagmi, but **all public RPC reads** are routed through a same-origin JSON-RPC proxy:
+  - `POST /api/rpc/<chainId>`
+  - Implementation: [route.ts](file:///home/jorel/Goldgard/goldgard-hookathon/frontend/app/api/rpc/%5BchainId%5D/route.ts)
+- The proxy forwards to server-only environment variables:
+  - `MAINNET_RPC_URL`, `SEPOLIA_RPC_URL`, `GOERLI_RPC_URL`, `DEMO_RPC_URL`
+- This keeps API keys off the client; the browser only sees `/api/rpc/<chainId>`.
+- The proxy validates `eth_chainId` responses and returns an error on chainId mismatches to prevent cross-network data confusion.
 
 ### Wallet + signing
 - wagmi + RainbowKit provide:
@@ -51,8 +61,19 @@
 - Provider setup: [providers.tsx](file:///home/jorel/Goldgard/goldgard-hookathon/frontend/app/providers.tsx)
 
 ### Event listening logic
-- Current dashboard uses a polling read (`getReactiveAlert`) instead of subscribing to events.
-- The underlying on-chain signal is `AlertLevelRaised(level, until)` on GoldgardHook; you can add an event subscription later if needed.
+- Dashboard uses a 5s-or-less refresh budget:
+  - Polling contract reads via wagmi query `refetchInterval` (≤ 5s).
+  - Optional WebSocket block subscription when a WS endpoint is configured:
+    - `NEXT_PUBLIC_MAINNET_WS_RPC_URL`, `NEXT_PUBLIC_SEPOLIA_WS_RPC_URL`, `NEXT_PUBLIC_GOERLI_WS_RPC_URL`, `NEXT_PUBLIC_ANVIL_WS_RPC_URL`
+    - WS endpoints that appear to be keyed (Alchemy/Infura/QuickNode URL patterns) are ignored to avoid client-side key exposure.
+  - If WS is not configured, the dashboard still stays within the refresh budget via polling.
+
+### Network selection + validation
+- The dashboard has an explicit network selector; reads are scoped to the selected network even if no wallet is connected.
+- When a wallet is connected, the UI will attempt to switch the wallet network to match the selected network.
+- Health checks:
+  - `RPC ok/degraded` is derived from calling `eth_chainId` through `/api/rpc/<chainId>` and verifying it matches the selected chainId.
+  - `Sync stalled` is raised if the block feed stops updating for an extended period while RPC is otherwise healthy.
 
 ## 3) Local End-to-End Testing Guide (Anvil + Frontend)
 
@@ -144,10 +165,21 @@ This writes:
 ## Troubleshooting
 
 ### Wrong network
-- If connected chainId doesn’t match the chosen config, switch networks in wallet.
+- If the wallet chainId doesn’t match the selected network, the dashboard will flag `Wallet mismatch`. Switching in-wallet will clear it.
 
 ### Local faucet errors
 - `/api/faucet` only works on chainId 31337 and requires a server-side private key configured for the node.
+
+### Network health checks
+- Dashboard shows RPC status:
+  - `RPC ok` means `/api/rpc/<chainId>` responds and returns the expected `eth_chainId`.
+  - `RPC degraded` means the active chain proxy is misconfigured or unreachable.
+
+### E2E network smoke check
+With the frontend server running, execute:
+```bash
+node scripts/e2e-dashboard.mjs
+```
 
 ### WalletConnect “Core initialized multiple times”
 - Ensure providers are not mounted multiple times; config is cached in [providers.tsx](file:///home/jorel/Goldgard/goldgard-hookathon/frontend/app/providers.tsx).

@@ -3,10 +3,11 @@
 import { RainbowKitProvider, darkTheme, getDefaultConfig } from "@rainbow-me/rainbowkit";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { http, WagmiProvider } from "wagmi";
-import { foundry, sepolia } from "wagmi/chains";
+import { foundry, goerli, mainnet, sepolia } from "wagmi/chains";
+
+import { rpcHttpPath, supportedChains } from "../lib/networks";
 
 const projectId = process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID ?? "00000000000000000000000000000000";
-const localRpcUrl = process.env.NEXT_PUBLIC_DEMO_RPC_URL ?? "http://127.0.0.1:8545";
 
 const globalForProviders = globalThis as unknown as {
   __gg_queryClient?: QueryClient;
@@ -18,10 +19,12 @@ const queryClient = (globalForProviders.__gg_queryClient ??= new QueryClient());
 const wagmiConfig = (globalForProviders.__gg_wagmiConfig ??= getDefaultConfig({
   appName: "Goldgard Hook",
   projectId,
-  chains: [foundry, sepolia],
+  chains: supportedChains,
   transports: {
-    [foundry.id]: http(localRpcUrl),
-    [sepolia.id]: http(),
+    [foundry.id]: http(rpcHttpPath(foundry.id)),
+    [sepolia.id]: http(rpcHttpPath(sepolia.id)),
+    [goerli.id]: http(rpcHttpPath(goerli.id)),
+    [mainnet.id]: http(rpcHttpPath(mainnet.id)),
   },
   ssr: false,
 }));

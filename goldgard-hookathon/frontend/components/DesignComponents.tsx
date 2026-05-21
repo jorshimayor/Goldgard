@@ -62,8 +62,13 @@ interface BeaconProps {
   className?: string;
 }
 
-export const Beacon: React.FC<BeaconProps> = ({ status, label, className = '' }) => (
-  <div className={`beacon ${className}`}>
+export const Beacon: React.FC<BeaconProps & React.HTMLAttributes<HTMLDivElement>> = ({
+  status,
+  label,
+  className = '',
+  ...props
+}) => (
+  <div className={`beacon ${className}`} {...props}>
     <div className={`beacon-dot status-${status}`} />
     {label && <span className="beacon-label">{label}</span>}
   </div>

@@ -25,6 +25,13 @@ export const goldgardHookAbi = [
   },
   {
     type: "function",
+    name: "coverageCapBps",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "", type: "uint16" }],
+  },
+  {
+    type: "function",
     name: "isEligible",
     stateMutability: "view",
     inputs: [

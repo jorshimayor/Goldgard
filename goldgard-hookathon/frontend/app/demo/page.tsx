@@ -9,6 +9,7 @@ import { Display, Subhead, Body, Data, RuneStone, LeverageRune } from "@/compone
 import { getDemoConfigForChain, isConfiguredAddress } from "../../lib/demoConfig";
 import { mockErc20Abi } from "../../lib/abi/mockErc20";
 import { swapRouterNoChecksAbi } from "../../lib/abi/swapRouterNoChecks";
+import { explorerTxUrl } from "../../lib/networks";
 
 type Step = "trade" | "prep" | "execute" | "review";
 
@@ -127,6 +128,7 @@ export default function DemoConsolePage() {
   }
 
   const wrongNetwork = okConfig && chainId !== cfg.chainId;
+  const txUrl = txHash ? explorerTxUrl(chainId, txHash) : undefined;
 
   return (
     <div className="min-h-screen bg-gg-bg px-4 py-10 sm:py-16">
@@ -280,14 +282,16 @@ export default function DemoConsolePage() {
                 </div>
                 <div className="flex items-center justify-between gap-3 bg-gg-surface/30 rounded-lg p-3 mt-3">
                   <Data as="code" className="break-all">{txHash}</Data>
-                  <a
-                    href={`https://sepolia.etherscan.io/tx/${txHash}`}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="inline-flex items-center gap-1 text-xs text-aged-gold hover:text-pale-gold transition-colors whitespace-nowrap flex-shrink-0"
-                  >
-                    View <ExternalLink className="h-3.5 w-3.5" />
-                  </a>
+                  {txUrl ? (
+                    <a
+                      href={txUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex items-center gap-1 text-xs text-aged-gold hover:text-pale-gold transition-colors whitespace-nowrap flex-shrink-0"
+                    >
+                      View <ExternalLink className="h-3.5 w-3.5" />
+                    </a>
+                  ) : null}
                 </div>
               </RuneStone>
             ) : null}

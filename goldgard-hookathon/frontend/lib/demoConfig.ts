@@ -3,6 +3,8 @@ import { z } from "zod";
 import local from "../app/config/demoConfig.local.json";
 import sepolia from "../app/config/demoConfig.sepolia.json";
 
+const ZERO = "0x0000000000000000000000000000000000000000";
+
 const DemoConfigSchema = z.object({
   callbackReceiver: z.string().optional(),
   chainId: z.number(),
@@ -27,6 +29,29 @@ const DemoConfigSchema = z.object({
 
 export type DemoConfig = z.infer<typeof DemoConfigSchema>;
 
+function emptyConfig(chainId: number): DemoConfig {
+  return DemoConfigSchema.parse({
+    chainId,
+    deployer: ZERO,
+    poolManager: ZERO,
+    stateView: ZERO,
+    hook: ZERO,
+    oracleAdapter: ZERO,
+    safetyModule: ZERO,
+    hedgeReserve: ZERO,
+    rewards: ZERO,
+    swapRouter: ZERO,
+    liquidityRouter: ZERO,
+    token0: ZERO,
+    token1: ZERO,
+    mockAggregator: ZERO,
+    tickSpacing: 0,
+    fee: 0,
+    minTick: 0,
+    maxTick: 0,
+  });
+}
+
 export function getDemoConfigForChain(chainId?: number): DemoConfig {
   const which = process.env.NEXT_PUBLIC_DEMO_CONFIG;
   if (which === "sepolia") return DemoConfigSchema.parse(sepolia);
@@ -35,6 +60,7 @@ export function getDemoConfigForChain(chainId?: number): DemoConfig {
   if (chainId === sepolia.chainId) return DemoConfigSchema.parse(sepolia);
   if (chainId === local.chainId) return DemoConfigSchema.parse(local);
 
+  if (chainId !== undefined) return emptyConfig(chainId);
   return DemoConfigSchema.parse(local);
 }
 
