@@ -42,3 +42,15 @@ forge script script/SimulatePriceSwing.s.sol:SimulatePriceSwing \
   --private-key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80 \
   --broadcast
 ```
+
+
+# confirm which address you’re using
+cast wallet address --private-key "$SEPOLIA_PRIVATE_KEY"
+
+# check its balance
+cast balance <that_address> --rpc-url "$SEPOLIA_RPC_URL"
+
+
+cd /home/jorel/Goldgard/goldgard-hookathon/contracts
+source .env
+forge script script/DeployDemo.s.sol:DeployDemo --rpc-url "$SEPOLIA_RPC_URL" --private-key "$SEPOLIA_PRIVATE_KEY" --broadcast
