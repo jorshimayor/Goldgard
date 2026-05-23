@@ -31,7 +31,7 @@ const wagmiConfig = (globalForProviders.__gg_wagmiConfig ??= getDefaultConfig({
 
 export function Providers({ children }: { children: React.ReactNode }) {
   return (
-    <WagmiProvider config={wagmiConfig}>
+    <WagmiProvider config={wagmiConfig} reconnectOnMount={false}>
       <QueryClientProvider client={queryClient}>
         <RainbowKitProvider
           theme={darkTheme({

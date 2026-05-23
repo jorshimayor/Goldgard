@@ -301,7 +301,7 @@ contract DeployDemo is Script {
         if (bytes(raw).length == 0) return 0;
         string memory trimmed = _trimLeft(raw);
         if (bytes(trimmed).length == 0) return 0;
-        return vm.parseUint(trimmed);
+        return vm.parseUint(_normalizeUintString(trimmed));
     }
 
     function _trimLeft(string memory s) internal pure returns (string memory) {
@@ -320,5 +320,28 @@ contract DeployDemo is Script {
             out[j] = b[i + j];
         }
         return string(out);
+    }
+
+    function _normalizeUintString(string memory s) internal pure returns (string memory) {
+        bytes memory b = bytes(s);
+        if (b.length >= 2 && b[0] == bytes1("0") && (b[1] == bytes1("x") || b[1] == bytes1("X"))) {
+            return s;
+        }
+        if (_isHex64(b)) return string.concat("0x", s);
+        return s;
+    }
+
+    function _isHex64(bytes memory b) internal pure returns (bool) {
+        if (b.length != 64) return false;
+        for (uint256 i = 0; i < 64; i++) {
+            if (!_isHexChar(b[i])) return false;
+        }
+        return true;
+    }
+
+    function _isHexChar(bytes1 c) internal pure returns (bool) {
+        return (c >= bytes1("0") && c <= bytes1("9")) ||
+            (c >= bytes1("a") && c <= bytes1("f")) ||
+            (c >= bytes1("A") && c <= bytes1("F"));
     }
 }
