@@ -15,18 +15,22 @@ export async function POST(request: Request) {
     amountPerStep?: string;
   };
 
-  const chainId = body.chainId;
+  const chainId = body.chainId ?? 11155111;
+  if (chainId !== 11155111) {
+    return NextResponse.json(
+      { ok: false, error: "Sepolia-only mode: unsupported chainId.", chainId },
+      { status: 400 },
+    );
+  }
 
-  const isSepolia = chainId === 11155111;
-  const rpcUrl = isSepolia ? process.env.SEPOLIA_RPC_URL : process.env.DEMO_RPC_URL;
-  const privateKey = isSepolia ? process.env.SEPOLIA_PRIVATE_KEY : process.env.DEMO_PRIVATE_KEY;
+  const rpcUrl = process.env.SEPOLIA_RPC_URL;
+  const privateKey = process.env.SEPOLIA_PRIVATE_KEY;
 
   if (!rpcUrl || !privateKey) {
     return NextResponse.json(
       {
         ok: false,
-        error:
-          "Missing DEMO_RPC_URL/DEMO_PRIVATE_KEY (local) or SEPOLIA_RPC_URL/SEPOLIA_PRIVATE_KEY (sepolia). This endpoint is meant for demos run from your machine.",
+        error: "Missing SEPOLIA_RPC_URL/SEPOLIA_PRIVATE_KEY. This endpoint is meant for demos run from your machine.",
       },
       { status: 400 },
     );

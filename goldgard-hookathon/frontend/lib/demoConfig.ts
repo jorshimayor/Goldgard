@@ -1,6 +1,5 @@
 import { z } from "zod";
 
-import local from "../app/config/demoConfig.local.json";
 import sepolia from "../app/config/demoConfig.sepolia.json";
 
 const ZERO = "0x0000000000000000000000000000000000000000";
@@ -53,19 +52,13 @@ function emptyConfig(chainId: number): DemoConfig {
 }
 
 export function getDemoConfigForChain(chainId?: number): DemoConfig {
-  const which = process.env.NEXT_PUBLIC_DEMO_CONFIG;
-  if (which === "sepolia") return DemoConfigSchema.parse(sepolia);
-  if (which === "local") return DemoConfigSchema.parse(local);
-
-  if (chainId === sepolia.chainId) return DemoConfigSchema.parse(sepolia);
-  if (chainId === local.chainId) return DemoConfigSchema.parse(local);
-
+  if (chainId === undefined || chainId === sepolia.chainId) return DemoConfigSchema.parse(sepolia);
   if (chainId !== undefined) return emptyConfig(chainId);
-  return DemoConfigSchema.parse(local);
+  return DemoConfigSchema.parse(sepolia);
 }
 
 export function getDemoConfig(): DemoConfig {
-  return getDemoConfigForChain(undefined);
+  return DemoConfigSchema.parse(sepolia);
 }
 
 export function isConfiguredAddress(addr: string) {

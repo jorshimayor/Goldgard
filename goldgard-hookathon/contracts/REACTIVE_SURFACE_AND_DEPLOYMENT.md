@@ -195,7 +195,7 @@ High-signal reads:
   - totalAssets()
   - epochId(), epochPremiumIn(), epochPayoutOut()
 
-## 5) Demo Walkthrough (Presentation Script)
+## 5) Demo Walkthrough (Presentation Script).
 
 ### Demo 1 — “Early warning” rune
 Expected outcome: dashboard shows a glowing rune when alert is active.

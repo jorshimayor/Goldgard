@@ -4,7 +4,6 @@ import Link from "next/link";
 import { ConnectButton } from "@rainbow-me/rainbowkit";
 import { Menu, X } from "lucide-react";
 import { useState } from "react";
-import { useChainId } from "wagmi";
 import { getDemoConfigForChain } from "../lib/demoConfig";
 import { Data } from "./DesignComponents";
 
@@ -16,9 +15,8 @@ const links = [
 
 export function Nav() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const chainId = useChainId();
-  const cfg = getDemoConfigForChain(chainId);
-  const netLabel = cfg.chainId === 11155111 ? "Sepolia" : cfg.chainId === 31337 ? "Local" : `Chain ${cfg.chainId}`;
+  const cfg = getDemoConfigForChain(11155111);
+  const netLabel = cfg.chainId === 11155111 ? "Sepolia" : `Chain ${cfg.chainId}`;
 
   return (
     <header className="sticky top-0 z-50 border-b border-gg-border bg-gg-bg/95 backdrop-blur-2xl shadow-gg transition-all duration-300">

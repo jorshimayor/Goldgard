@@ -1,6 +1,6 @@
 import { defineConfig } from "@playwright/test";
 
-const baseURL = process.env.BASE_URL ?? "http://127.0.0.1:3000";
+const baseURL = process.env.BASE_URL ?? "http://127.0.0.1:3001";
 
 export default defineConfig({
   testDir: "./e2e",
@@ -14,7 +14,7 @@ export default defineConfig({
     trace: "retain-on-failure",
   },
   webServer: {
-    command: "pnpm dev -- --port 3000",
+    command: "pnpm dev -p 3001",
     url: baseURL,
     reuseExistingServer: true,
     timeout: 120_000,

@@ -21,7 +21,7 @@ import { goldgardHookAbi } from "../../lib/abi/goldgardHook";
 import { safetyModuleAbi } from "../../lib/abi/safetyModule";
 import { rewardDistributorAbi } from "../../lib/abi/rewardDistributor";
 import { erc20Abi } from "../../lib/abi/erc20";
-import { chainLabel, rpcWsUrl, supportedChains } from "../../lib/networks";
+import { chainLabel, rpcWsUrl } from "../../lib/networks";
 
 type SeriesPoint = { t: number; value: number };
 
@@ -69,10 +69,10 @@ function SeriesTooltip({
 
 export default function DashboardPage() {
   const walletChainId = useChainId();
-  const [viewChainId, setViewChainId] = useState(walletChainId);
-  const cfg = useMemo(() => getDemoConfigForChain(viewChainId), [viewChainId]);
+  const viewChainId = 11155111;
+  const cfg = useMemo(() => getDemoConfigForChain(viewChainId), []);
   const { address, isConnected } = useAccount();
-  const { switchChain, isPending: switching } = useSwitchChain();
+  const { switchChain } = useSwitchChain();
 
   const [rpcHealthy, setRpcHealthy] = useState<boolean | null>(null);
   const [rpcError, setRpcError] = useState<string | null>(null);
@@ -83,25 +83,10 @@ export default function DashboardPage() {
   const lastBlockSeenAt = useRef<number | null>(null);
 
   useEffect(() => {
-    try {
-      const raw = window.localStorage.getItem("gg:viewChainId");
-      const parsed = raw ? Number(raw) : NaN;
-      if (Number.isFinite(parsed)) {
-        setViewChainId(parsed);
-      } else {
-        setViewChainId(walletChainId);
-      }
-    } catch {
-      setViewChainId(walletChainId);
-    }
-  }, [walletChainId]);
-
-  useEffect(() => {
-    try {
-      window.localStorage.setItem("gg:viewChainId", String(viewChainId));
-    } catch {
-    }
-  }, [viewChainId]);
+    if (!isConnected) return;
+    if (walletChainId === viewChainId) return;
+    switchChain({ chainId: viewChainId });
+  }, [isConnected, switchChain, viewChainId, walletChainId]);
 
   const { data: blockNumber } = useBlockNumber({
     chainId: viewChainId,
@@ -401,23 +386,9 @@ export default function DashboardPage() {
           <div className="mt-6 flex items-center gap-4 flex-wrap">
             <div className="flex items-center gap-2 rounded-xl border border-gg-border/60 bg-gg-surface/40 px-3 py-2 backdrop-blur-sm">
               <Network className="h-4 w-4 text-aged-gold" />
-              <select
-                className="bg-transparent text-sm font-semibold text-foreground outline-none"
-                value={viewChainId}
-                data-testid="network-select"
-                onChange={(e) => {
-                  const next = Number(e.target.value);
-                  setViewChainId(next);
-                  if (isConnected) switchChain({ chainId: next });
-                }}
-                disabled={switching}
-              >
-                {supportedChains.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {chainLabel(c.id)}
-                  </option>
-                ))}
-              </select>
+              <div className="bg-transparent text-sm font-semibold text-foreground" data-testid="network-select">
+                {chainLabel(viewChainId)}
+              </div>
             </div>
 
             <Beacon

@@ -27,29 +27,26 @@
 ### `/demo` (Demo Console)
 - Purpose: Execute the main “swap → premium → rebalance” user flow.
 - Key user actions:
-  - “Get Tokens (Faucet)” on local (31337) uses server-side faucet endpoint.
+  - Mint demo tokens (MockERC20.mint)
   - Approve swap router spending
   - Execute swaps via SwapRouterNoChecks
 - Contract writes (client-side):
   - ERC20 approve(token, spender, amount)
   - SwapRouterNoChecks.swap(...)
-- Server-side writes (local-only):
-  - `/api/faucet` funds ETH + mints token0/token1 to the connected wallet on Anvil.
 
 ## 2) How the Frontend Connects to Contracts
 
-### Config selection (local vs sepolia)
-- Frontend selects config based on the active chainId:
-  - Local: `app/config/demoConfig.local.json`
-  - Sepolia: `app/config/demoConfig.sepolia.json`
+### Config selection (Sepolia-only)
+- Frontend uses Sepolia config:
+  - `app/config/demoConfig.sepolia.json`
 - Source: [demoConfig.ts](file:///home/jorel/Goldgard/goldgard-hookathon/frontend/lib/demoConfig.ts)
 
-### RPC routing (mainnet/testnet/anvil) and secret handling
+### RPC routing (Sepolia-only) and secret handling
 - Client-side reads/writes use wagmi, but **all public RPC reads** are routed through a same-origin JSON-RPC proxy:
   - `POST /api/rpc/<chainId>`
   - Implementation: [route.ts](file:///home/jorel/Goldgard/goldgard-hookathon/frontend/app/api/rpc/%5BchainId%5D/route.ts)
-- The proxy forwards to server-only environment variables:
-  - `MAINNET_RPC_URL`, `SEPOLIA_RPC_URL`, `GOERLI_RPC_URL`, `DEMO_RPC_URL`
+- The proxy forwards to a server-only environment variable:
+  - `SEPOLIA_RPC_URL`
 - This keeps API keys off the client; the browser only sees `/api/rpc/<chainId>`.
 - The proxy validates `eth_chainId` responses and returns an error on chainId mismatches to prevent cross-network data confusion.
 
@@ -64,60 +61,18 @@
 - Dashboard uses a 5s-or-less refresh budget:
   - Polling contract reads via wagmi query `refetchInterval` (≤ 5s).
   - Optional WebSocket block subscription when a WS endpoint is configured:
-    - `NEXT_PUBLIC_MAINNET_WS_RPC_URL`, `NEXT_PUBLIC_SEPOLIA_WS_RPC_URL`, `NEXT_PUBLIC_GOERLI_WS_RPC_URL`, `NEXT_PUBLIC_ANVIL_WS_RPC_URL`
+    - `NEXT_PUBLIC_SEPOLIA_WS_RPC_URL`
     - WS endpoints that appear to be keyed (Alchemy/Infura/QuickNode URL patterns) are ignored to avoid client-side key exposure.
   - If WS is not configured, the dashboard still stays within the refresh budget via polling.
 
 ### Network selection + validation
-- The dashboard has an explicit network selector; reads are scoped to the selected network even if no wallet is connected.
-- When a wallet is connected, the UI will attempt to switch the wallet network to match the selected network.
+- The app is locked to Sepolia for testing and demos.
+- When a wallet is connected, the UI will prompt to switch the wallet network to Sepolia and keep it there.
 - Health checks:
   - `RPC ok/degraded` is derived from calling `eth_chainId` through `/api/rpc/<chainId>` and verifying it matches the selected chainId.
   - `Sync stalled` is raised if the block feed stops updating for an extended period while RPC is otherwise healthy.
 
-## 3) Local End-to-End Testing Guide (Anvil + Frontend)
-
-### Step 1 — Start Anvil
-```bash
-anvil
-```
-
-### Step 2 — Deploy contracts and generate frontend config
-From `goldgard-hookathon/contracts`:
-```bash
-export REACTIVE_CALLBACK_PROXY=0x000000000000000000000000000000000000dEaD
-forge script script/DeployDemo.s.sol:DeployDemo --rpc-url http://127.0.0.1:8545 --broadcast
-```
-
-This writes:
-- `frontend/app/config/demoConfig.local.json`
-
-### Step 3 — Run the frontend
-From `goldgard-hookathon/frontend`:
-```bash
-pnpm install
-pnpm dev
-```
-
-### Step 4 — Validate core user flows
-- Connect wallet (RainbowKit).
-- Open `/demo`:
-  - Click “Get Tokens (Faucet)” (local only).
-  - Approve swap router.
-  - Execute swap.
-- Open `/dashboard`:
-  - Confirm SafetyModule.totalAssets increases after swaps.
-
-### Step 5 — Validate reactive rune signal (local)
-To activate the rune on local, call `handleAlertLevel` on the Callback Receiver from the configured proxy address.
-
-If you set `REACTIVE_CALLBACK_PROXY` to an account you control:
-```bash
-cast send <CALLBACK_RECEIVER_ADDRESS> "handleAlertLevel(uint8)" 1 --rpc-url http://127.0.0.1:8545 --private-key <PK_OF_PROXY>
-```
-Then refresh `/dashboard` and verify the rune turns active.
-
-## 4) Sepolia End-to-End Guide
+## 3) Sepolia End-to-End Guide
 
 ### Deploy to Sepolia
 From `goldgard-hookathon/contracts`:
@@ -165,10 +120,10 @@ This writes:
 ## Troubleshooting
 
 ### Wrong network
-- If the wallet chainId doesn’t match the selected network, the dashboard will flag `Wallet mismatch`. Switching in-wallet will clear it.
+- If the wallet chainId doesn’t match Sepolia, the UI will prompt to switch and will flag `Wallet mismatch` until it matches.
 
-### Local faucet errors
-- `/api/faucet` only works on chainId 31337 and requires a server-side private key configured for the node.
+### Faucet
+- There is no faucet endpoint for Sepolia mode; token minting is done by calling MockERC20.mint from the connected wallet.
 
 ### Network health checks
 - Dashboard shows RPC status:

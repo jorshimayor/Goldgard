@@ -3,10 +3,7 @@ import { NextResponse } from "next/server";
 export const runtime = "nodejs";
 
 const CHAIN_ENV: Record<number, string> = {
-  1: "MAINNET_RPC_URL",
-  5: "GOERLI_RPC_URL",
   11155111: "SEPOLIA_RPC_URL",
-  31337: "DEMO_RPC_URL",
 };
 
 function pickUpstreamUrl(chainId: number) {
@@ -31,6 +28,13 @@ export async function POST(
   const chainId = Number(chainIdRaw);
   if (!Number.isFinite(chainId)) {
     return NextResponse.json({ error: "Invalid chainId" }, { status: 400 });
+  }
+
+  if (chainId !== 11155111) {
+    return NextResponse.json(
+      { error: "Sepolia-only mode: unsupported chainId.", chainId },
+      { status: 400 },
+    );
   }
 
   const upstreamUrl = pickUpstreamUrl(chainId);

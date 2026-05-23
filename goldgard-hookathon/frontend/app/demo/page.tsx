@@ -14,8 +14,8 @@ import { explorerTxUrl } from "../../lib/networks";
 type Step = "trade" | "prep" | "execute" | "review";
 
 export default function DemoConsolePage() {
-  const chainId = useChainId();
-  const cfg = useMemo(() => getDemoConfigForChain(chainId), [chainId]);
+  const walletChainId = useChainId();
+  const cfg = useMemo(() => getDemoConfigForChain(11155111), []);
   const { address } = useAccount();
   const client = usePublicClient();
   const { writeContractAsync } = useWriteContract();
@@ -52,7 +52,7 @@ export default function DemoConsolePage() {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({
-            chainId,
+            chainId: cfg.chainId,
             address,
             tokenAmount: amount || "1000",
           }),
@@ -127,8 +127,8 @@ export default function DemoConsolePage() {
     }
   }
 
-  const wrongNetwork = okConfig && chainId !== cfg.chainId;
-  const txUrl = txHash ? explorerTxUrl(chainId, txHash) : undefined;
+  const wrongNetwork = okConfig && walletChainId !== cfg.chainId;
+  const txUrl = txHash ? explorerTxUrl(cfg.chainId, txHash) : undefined;
 
   return (
     <div className="min-h-screen bg-gg-bg px-4 py-10 sm:py-16">

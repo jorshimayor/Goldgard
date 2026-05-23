@@ -34,29 +34,24 @@ test("dashboard uses live RPC data and switches networks", async ({ page }: { pa
 
   const select = page.getByTestId("network-select");
   await expect(select).toBeVisible();
+  await expect(select).toContainText("Sepolia");
 
-  const chains: Array<{ chainId: number; hex: string; label: string }> = [
-    { chainId: 1, hex: "0x1", label: "Mainnet" },
-    { chainId: 11155111, hex: "0xaa36a7", label: "Sepolia" },
-    { chainId: 5, hex: "0x5", label: "Goerli" },
-  ];
+  await expect(page.getByTestId("rpc-status")).toContainText(/RPC ok|Sync stalled/);
 
-  for (const c of chains) {
-    const ok = await chainConfigured(page, c.chainId, c.hex);
-    if (!ok) continue;
+  const ok = await chainConfigured(page, 11155111, "0xaa36a7");
+  expect(ok).toBeTruthy();
 
-    await select.selectOption(String(c.chainId));
-    await expect(page.getByTestId("rpc-status")).toContainText(/RPC ok|Sync stalled/);
+  const r = await rpc(page, 11155111, "eth_chainId");
+  expect(r.ok).toBeTruthy();
+  expect(r.json.result).toBe("0xaa36a7");
 
-    const r = await rpc(page, c.chainId, "eth_chainId");
-    expect(r.ok).toBeTruthy();
-    expect(r.json.result).toBe(c.hex);
+  const bn = await rpc(page, 11155111, "eth_blockNumber");
+  expect(bn.ok).toBeTruthy();
+  const latest = BigInt(bn.json.result);
+  await waitForBlockToMatch(page, latest);
 
-    const bn = await rpc(page, c.chainId, "eth_blockNumber");
-    expect(bn.ok).toBeTruthy();
-    const latest = BigInt(bn.json.result);
-    await waitForBlockToMatch(page, latest);
-  }
+  const unsupported = await rpc(page, 1, "eth_chainId");
+  expect(unsupported.ok).toBeFalsy();
 });
 
 test("dashboard remains responsive under live polling", async ({ page }: { page: any }) => {
