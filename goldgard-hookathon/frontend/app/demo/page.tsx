@@ -276,7 +276,7 @@ export default function DemoConsolePage() {
               <button
                 disabled={!address || !okConfig || wrongNetwork || amountWei === 0n || busy}
                 onClick={mint}
-                className="group relative h-12 rounded-xl border border-gg-border/50 bg-gg-surface/30 font-semibold text-sm overflow-hidden transition-all duration-300 hover:border-aged-gold/50 disabled:opacity-40 disabled:cursor-not-allowed"
+                className="group relative h-12 rounded-xl border border-aged-gold/40 bg-gradient-to-r from-aged-gold/12 to-gg-surface/40 font-semibold text-sm text-foreground overflow-hidden transition-all duration-300 hover:border-aged-gold hover:shadow-[0_0_0_1px_rgba(212,175,119,0.2),0_0_24px_rgba(212,175,119,0.12)] cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 <div className="absolute inset-0 bg-gradient-to-r from-aged-gold/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
                 <div className="relative flex items-center justify-center gap-2">
@@ -288,10 +288,13 @@ export default function DemoConsolePage() {
               <button
                 disabled={!address || !okConfig || wrongNetwork || amountWei === 0n || busy}
                 onClick={approve}
-                className="group relative h-12 rounded-xl border border-gg-border/50 bg-gg-surface/30 font-semibold text-sm overflow-hidden transition-all duration-300 hover:border-aged-gold/50 disabled:opacity-40 disabled:cursor-not-allowed"
+                className="group relative h-12 rounded-xl border border-aged-gold/40 bg-gradient-to-r from-aged-gold/12 to-gg-surface/40 font-semibold text-sm text-foreground overflow-hidden transition-all duration-300 hover:border-aged-gold hover:shadow-[0_0_0_1px_rgba(212,175,119,0.2),0_0_24px_rgba(212,175,119,0.12)] cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 <div className="absolute inset-0 bg-gradient-to-r from-aged-gold/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
-                <div className="relative">Approve Router</div>
+                <div className="relative flex items-center justify-center gap-2">
+                  <ArrowRight className="h-4 w-4 text-aged-gold" />
+                  Approve Router
+                </div>
               </button>
 
               <LeverageRune

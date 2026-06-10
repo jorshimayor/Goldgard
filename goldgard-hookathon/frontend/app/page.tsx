@@ -1,8 +1,13 @@
-﻿import Link from "next/link";
-import { ArrowRight, Shield, Waves, Swords, Zap, Lock, TrendingUp, BarChart3 } from "lucide-react";
+"use client";
+
+import Link from "next/link";
+import { useState } from "react";
+import { ArrowRight, Shield, Waves, Swords, Zap, Lock, TrendingUp, BarChart3, CircleHelp, X } from "lucide-react";
 import { Display, Subhead, Body, Data, RuneStone, LeverageRune } from "@/components/DesignComponents";
 
 export default function Home() {
+  const [helpOpen, setHelpOpen] = useState(false);
+
   return (
     <div className="min-h-screen bg-gg-bg">
       <div className="mx-auto w-full max-w-7xl px-4 py-12 sm:py-20">
@@ -47,6 +52,14 @@ export default function Home() {
                     <Zap className="h-4 w-4 group-hover:text-aged-gold transition-colors" />
                   </span>
                 </Link>
+                <button
+                  type="button"
+                  onClick={() => setHelpOpen(true)}
+                  className="inline-flex h-12 items-center justify-center gap-2 rounded-xl border border-gg-border/50 bg-gg-surface/30 px-6 font-semibold text-foreground transition-all duration-300 hover:border-aged-gold/50 hover:bg-gg-surface/50 backdrop-blur-sm cursor-pointer"
+                >
+                  <CircleHelp className="h-4 w-4 text-aged-gold" />
+                  How To Use Goldgard
+                </button>
               </div>
             </div>
 
@@ -187,6 +200,53 @@ export default function Home() {
           </div>
         </section>
       </div>
+
+      {helpOpen ? (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/70 px-4 py-6 backdrop-blur-sm">
+          <div className="absolute inset-0" onClick={() => setHelpOpen(false)} />
+          <div className="relative z-[71] w-full max-w-2xl rounded-3xl border border-gg-border/60 bg-gg-bg/95 p-6 shadow-[0_24px_80px_rgba(0,0,0,0.55)] backdrop-blur-xl sm:p-8">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <Subhead className="text-lg">How To Use Goldgard</Subhead>
+                <Body className="mt-2 text-gg-muted text-sm">
+                  A quick walkthrough for first-time users.
+                </Body>
+              </div>
+              <button
+                type="button"
+                onClick={() => setHelpOpen(false)}
+                className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-gg-border/50 bg-gg-surface/30 text-foreground transition-colors hover:border-aged-gold/50 cursor-pointer"
+                aria-label="Close help modal"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="mt-6 space-y-5 text-sm text-gg-muted">
+              <div>
+                <div className="font-semibold text-foreground">1. Start on the landing page</div>
+                <div className="mt-1">Read the product overview, then choose whether you want to try the demo flow or monitor the live dashboard.</div>
+              </div>
+              <div>
+                <div className="font-semibold text-foreground">2. Use the Demo Console</div>
+                <div className="mt-1">Connect your wallet, pick a direction, enter an amount, mint demo tokens if needed, approve the router, then execute the swap.</div>
+              </div>
+              <div>
+                <div className="font-semibold text-foreground">3. Watch the Dashboard</div>
+                <div className="mt-1">Use the dashboard to track reserve assets, reward balance, reactive alerts, reserve history, and data-feed health.</div>
+              </div>
+              <div>
+                <div className="font-semibold text-foreground">4. Run an insurance scenario</div>
+                <div className="mt-1">Open the Insurance Scenario Builder from the dashboard if you want to simulate premium, payout, and reactive trigger outcomes.</div>
+              </div>
+              <div className="rounded-xl border border-gg-border/50 bg-gg-surface/30 p-4">
+                <div className="font-semibold text-foreground">Best practice</div>
+                <div className="mt-2">Wait for `Mint Tokens` and `Approve Router` to confirm before pressing `Execute`, and do not change trade direction after approving unless you approve again.</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

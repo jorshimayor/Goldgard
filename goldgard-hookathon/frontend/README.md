@@ -1,121 +1,62 @@
 # Goldgard Frontend
 
-This frontend is a Next.js 15 app that sits on top of the Goldgard contracts and demo deployment configs. It provides:
+## How To Use The Frontend
 
-- a landing page for the product story
-- a demo console for mint, approve, and swap flows
-- a dashboard for reserve, alert, rewards, and contract-backed telemetry
-- API routes for RPC proxying, event streaming, simulations, and local demo helpers
+### Landing Page
 
-## App Structure
+Route: `/`
 
-- `app/page.tsx`
-  - Landing page for the product and demo entrypoints.
+- Start here if you want the product overview first.
+- Use `Run the Demo Console` to try the contract flow.
+- Use `Enter the Shieldwall` or `Launch Dashboard` to monitor the live app.
+- Use `How To Use Goldgard` for the in-app quick guide.
 
-- `app/demo/page.tsx`
-  - Demo console for minting mock tokens, approving the router, and executing swaps against the configured deployment.
-  - Uses `getDemoConfigForChain()` so the UI follows the active supported chain instead of assuming one network.
+### Demo Console
 
-- `app/dashboard/page.tsx`
-  - Live dashboard for reserve assets, reactive alerts, RPC health, wallet balances, GGARD rewards, and simulation output.
-  - Reads contract state through `wagmi` and consumes the event stream route for near-real-time updates.
+Route: `/demo`
 
-- `app/pool/[address]/page.tsx`
-  - Placeholder detail page for future pool-level charts and timelines.
+Use this page to run the demo swap flow.
 
-## Contract Wiring
+1. Connect your wallet.
+2. Make sure your wallet is on the chain shown by the app.
+3. Pick a trade direction.
+4. Enter an amount.
+5. Click `Mint Tokens`.
+6. Wait for the mint transaction to confirm.
+7. Click `Approve Router`.
+8. Wait for the approval transaction to confirm.
+9. Click `Execute`.
 
-The frontend uses deployment JSON files in `app/config/`:
+Important:
 
-- `demoConfig.sepolia.json`
-- `demoConfig.local.json`
+- If you switch trade direction after approval, approve again for the new token.
+- If the page says `Wrong network selected`, switch your wallet network.
+- If the page says `Demo config not configured`, that chain does not have a frontend deployment config yet.
 
-Those files define the deployed addresses for:
+### Dashboard
 
-- `hook`
-- `oracleAdapter`
-- `safetyModule`
-- `hedgeReserve`
-- `rewards`
-- `swapRouter`
-- `liquidityRouter`
-- `token0`
-- `token1`
-- optional Reactive callback addresses
+Route: `/dashboard`
 
-Runtime access happens through `lib/demoConfig.ts`, which validates and returns config per chain.
+Use this page to monitor the protocol.
 
-## API Routes
+- `SafetyModule Assets` shows the live reserve balance.
+- `GGARD Balance` shows the connected wallet reward balance.
+- `Reactive Sentinel` shows whether the early-warning system is active.
+- `Reserve History` shows the rolling reserve chart.
+- `RPC ok`, `WS ok`, and `Events ok` show frontend data-feed health.
 
-- `app/api/rpc/[chainId]/route.ts`
-  - RPC proxy used by the frontend and wallet layer.
-  - Validates the target chain and forwards JSON-RPC requests to the configured upstream URL.
+### Insurance Scenario Builder
 
-- `app/api/events/[chainId]/route.ts`
-  - Server-sent events endpoint that streams decoded onchain events from the configured Goldgard contracts.
+Location: opened from the dashboard modal
 
-- `app/api/insurance-simulate/route.js`
-  - Runs the insurance simulation and returns JSON plus markdown output.
-  - Imports from `scripts/insuranceSimulation.mjs`.
+- Open the modal from the `Insurance Simulator` card.
+- Adjust the scenario values.
+- Run the scenario.
+- Review premium, payout, coverage, and reactive metrics.
+- Expand the markdown block if you want report-ready output.
 
-- `app/api/testnet-simulations/route.js`
-  - Runs the testnet rerun batch flow and returns structured report output.
+### Quick Route Guide
 
-- `app/api/faucet/route.ts`
-  - Local-only helper for minting demo balances when running against Anvil.
-
-## Important Libraries
-
-- `lib/demoConfig.ts`
-  - Loads and validates deployment configs.
-
-- `lib/networks.ts`
-  - Supported chain list, labels, explorer URLs, and RPC helper paths.
-
-- `lib/eventStream.ts`
-  - Browser-side event stream hook used by the dashboard.
-
-- `lib/abi/`
-  - Minimal ABIs used for contract reads and writes.
-
-## Favicon
-
-- The app favicon is served from `public/goldgard.png`.
-- Metadata is configured in `app/layout.tsx`.
-
-## Development
-
-Install dependencies:
-
-```bash
-pnpm install
-```
-
-Run the dev server:
-
-```bash
-pnpm dev
-```
-
-Typecheck:
-
-```bash
-pnpm exec tsc --noEmit
-```
-
-## Environment Notes
-
-Common env vars used by the frontend server routes:
-
-- `SEPOLIA_RPC_URL`
-- `LOCAL_RPC_URL`
-- `BASE_SEPOLIA_RPC_URL`
-- `OPTIMISM_SEPOLIA_RPC_URL`
-- `ARBITRUM_SEPOLIA_RPC_URL`
-- `POLYGON_AMOY_RPC_URL`
-- `NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID`
-
-For local demo execution from the UI, set:
-
-- `DEMO_RPC_URL`
-- `DEMO_PRIVATE_KEY`
+- `/` for the overview
+- `/demo` for swap simulation
+- `/dashboard` for monitoring and insurance scenarios
