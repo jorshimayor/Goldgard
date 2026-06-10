@@ -4,7 +4,7 @@ import {
   defaultSimulationConfig,
   formatSimulationReport,
   runInsuranceSimulation,
-} from "../../../../scripts/insuranceSimulation.mjs";
+} from "../../../scripts/insuranceSimulation.mjs";
 
 export const runtime = "nodejs";
 

@@ -40,6 +40,11 @@ const jetbrainsMono = JetBrains_Mono({
 export const metadata: Metadata = {
   title: "Goldgard — Yield Shield of the LSTs",
   description: "Protect Thy Yield — The First Delta-Neutral LST Hook (Uniswap v4 Hook Demo)",
+  icons: {
+    icon: "/goldgard.png",
+    shortcut: "/goldgard.png",
+    apple: "/goldgard.png",
+  },
 };
 
 export default function RootLayout({

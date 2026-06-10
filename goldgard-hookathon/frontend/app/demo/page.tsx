@@ -9,15 +9,23 @@ import { Display, Subhead, Body, Data, RuneStone, LeverageRune } from "@/compone
 import { getDemoConfigForChain, isConfiguredAddress } from "../../lib/demoConfig";
 import { mockErc20Abi } from "../../lib/abi/mockErc20";
 import { swapRouterNoChecksAbi } from "../../lib/abi/swapRouterNoChecks";
-import { explorerTxUrl } from "../../lib/networks";
+import { explorerTxUrl, supportedChains } from "../../lib/networks";
 
 type Step = "trade" | "prep" | "execute" | "review";
+const DEMO_SWAP_GAS_CAP = 2_000_000n;
 
 export default function DemoConsolePage() {
   const walletChainId = useChainId();
-  const cfg = useMemo(() => getDemoConfigForChain(11155111), []);
+  const viewChainId = useMemo(
+    () =>
+      supportedChains.some((chain) => chain.id === walletChainId)
+        ? walletChainId
+        : 11155111,
+    [walletChainId],
+  );
+  const cfg = useMemo(() => getDemoConfigForChain(viewChainId), [viewChainId]);
   const { address } = useAccount();
-  const client = usePublicClient();
+  const client = usePublicClient({ chainId: cfg.chainId });
   const { writeContractAsync } = useWriteContract();
 
   const [step, setStep] = useState<Step>("trade");
@@ -95,28 +103,45 @@ export default function DemoConsolePage() {
   }
 
   async function execute() {
-    if (!client) return;
+    if (!client || !address) return;
     setBusy(true);
     setError(null);
     try {
+      const swapArgs = [
+        {
+          currency0: cfg.token0 as `0x${string}`,
+          currency1: cfg.token1 as `0x${string}`,
+          fee: cfg.fee,
+          tickSpacing: cfg.tickSpacing,
+          hooks: cfg.hook as `0x${string}`,
+        },
+        {
+          zeroForOne: dir === "0to1",
+          amountSpecified: -amountWei,
+          sqrtPriceLimitX96: dir === "0to1" ? 4295128740n : 1461446703485210103287273052203988822378723970341n,
+        },
+      ] as const;
+
+      let gas = DEMO_SWAP_GAS_CAP;
+      try {
+        const estimatedGas = await client.estimateContractGas({
+          account: address,
+          abi: swapRouterNoChecksAbi,
+          address: cfg.swapRouter as `0x${string}`,
+          functionName: "swap",
+          args: swapArgs,
+        });
+        const paddedGas = estimatedGas + estimatedGas / 5n;
+        gas = paddedGas < DEMO_SWAP_GAS_CAP ? paddedGas : DEMO_SWAP_GAS_CAP;
+      } catch {
+      }
+
       const hash = await writeContractAsync({
         abi: swapRouterNoChecksAbi,
         address: cfg.swapRouter as `0x${string}`,
         functionName: "swap",
-        args: [
-          {
-            currency0: cfg.token0 as `0x${string}`,
-            currency1: cfg.token1 as `0x${string}`,
-            fee: cfg.fee,
-            tickSpacing: cfg.tickSpacing,
-            hooks: cfg.hook as `0x${string}`,
-          },
-          {
-            zeroForOne: dir === "0to1",
-            amountSpecified: -amountWei,
-            sqrtPriceLimitX96: dir === "0to1" ? 4295128740n : 1461446703485210103287273052203988822378723970341n,
-          },
-        ],
+        args: swapArgs,
+        gas,
       });
       setTxHash(hash);
       setStep("review");
@@ -152,11 +177,19 @@ export default function DemoConsolePage() {
         {!okConfig ? (
           <div className="mb-6 rounded-xl border border-gg-border/50 bg-aged-gold/5 p-4 text-sm text-gg-muted">
             <p className="font-semibold text-foreground mb-1">Demo config not configured</p>
-            Deploy and regenerate{" "}
-            <Data as="code">
-              {cfg.chainId === 11155111 ? "app/config/demoConfig.sepolia.json" : "app/config/demoConfig.local.json"}
-            </Data>
-            .
+            {cfg.chainId === 11155111 || cfg.chainId === 31337 ? (
+              <>
+                Deploy and regenerate{" "}
+                <Data as="code">
+                  {cfg.chainId === 11155111
+                    ? "app/config/demoConfig.sepolia.json"
+                    : "app/config/demoConfig.local.json"}
+                </Data>
+                .
+              </>
+            ) : (
+              <>No contract deployment config is loaded for chainId <Data as="code">{cfg.chainId}</Data>.</>
+            )}
           </div>
         ) : null}
 

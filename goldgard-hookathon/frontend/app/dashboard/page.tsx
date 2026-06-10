@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { BarChart3, Coins, FileText, Network, Play, ShieldCheck, Zap } from "lucide-react";
+import { BarChart3, Coins, FileText, Network, Play, ShieldCheck, X, Zap } from "lucide-react";
 import { Display, Subhead, Body, Data, RuneStone, Beacon, ForgedLines } from "@/components/DesignComponents";
 import {
   Area,
@@ -307,17 +307,51 @@ export default function DashboardPage() {
   const [insuranceError, setInsuranceError] = useState<string | null>(null);
   const [insuranceReport, setInsuranceReport] = useState<InsuranceSimulationReport | null>(null);
   const [insuranceMarkdown, setInsuranceMarkdown] = useState<string>("");
+  const [insuranceModalOpen, setInsuranceModalOpen] = useState(false);
   useEffect(() => {
     if (safetyAssets === undefined) return;
     if (safetyAssetDecimals === undefined) return;
+
     const now = Date.now();
-    const val = Number(formatUnits(safetyAssets, safetyAssetDecimals));
+    const value = Number(formatUnits(safetyAssets, safetyAssetDecimals));
+    const cadenceMs = 5_000;
+
     setSeries((prev) => {
-      const next = [...prev, { t: now, value: val }];
+      if (prev.length === 0) {
+        const seeded = Array.from({ length: 12 }, (_, index) => ({
+          t: now - (11 - index) * cadenceMs,
+          value,
+        }));
+        return seeded;
+      }
+
+      const last = prev[prev.length - 1];
+      if (last && now - last.t < 3_000) return prev;
+
       const cutoff = now - 10 * 60 * 1000;
-      return next.filter((p) => p.t >= cutoff);
+      const next = [...prev, { t: now, value }];
+      return next.filter((point) => point.t >= cutoff);
     });
-  }, [safetyAssets, safetyAssetDecimals]);
+  }, [blockNumber, wsBlockNumber, safetyAssets, safetyAssetDecimals]);
+
+  const seriesDomain = useMemo<[number, number]>(() => {
+    if (series.length === 0) return [0, 1];
+
+    let min = Number.POSITIVE_INFINITY;
+    let max = Number.NEGATIVE_INFINITY;
+    for (const point of series) {
+      if (point.value < min) min = point.value;
+      if (point.value > max) max = point.value;
+    }
+
+    if (min === max) {
+      const pad = Math.max(Math.abs(max) * 0.02, 1);
+      return [min - pad, max + pad];
+    }
+
+    const pad = (max - min) * 0.1;
+    return [min - pad, max + pad];
+  }, [series]);
 
   useEffect(() => {
     async function checkHealth() {
@@ -638,9 +672,9 @@ export default function DashboardPage() {
                 <div>
                   <div className="flex items-center gap-2 text-sm text-gg-muted mb-1">
                     <BarChart3 className="h-4 w-4" />
-                    <span className="font-semibold">IL Comparison</span>
+                    <span className="font-semibold">Reserve History</span>
                   </div>
-                  <Display variant="lg" className="mt-2">SafetyModule Assets (Live)</Display>
+                  <Display variant="lg" className="mt-2">Safety Module Reserve History</Display>
                 </div>
                 <Beacon status="active" label="Live" />
               </div>
@@ -681,6 +715,7 @@ export default function DashboardPage() {
                       tick={{ fill: "rgba(245,227,166,0.85)", fontSize: 12 }}
                       tickLine={false}
                       axisLine={false}
+                      domain={seriesDomain}
                       tickFormatter={(v) => formatNumber(Number(v), { maximumFractionDigits: 3 })}
                       width={56}
                     />
@@ -752,57 +787,33 @@ export default function DashboardPage() {
               </div>
 
               <Body className="text-gg-muted text-sm">
-                Run stochastic insurance scenarios from the dashboard and return report-ready coverage, premium, and reactive-trigger metrics.
+                Launch the scenario builder in a modal to run stochastic insurance cases without stretching the sidebar.
               </Body>
 
-              <div className="mt-6 grid gap-3 sm:grid-cols-2">
-                <label className="space-y-2">
-                  <Data className="text-gg-muted block text-xs">Periods</Data>
-                  <input
-                    value={insurancePeriods}
-                    onChange={(e) => setInsurancePeriods(e.target.value)}
-                    inputMode="numeric"
-                    className="h-11 w-full rounded-xl border border-gg-border/50 bg-gg-surface/30 px-4 text-sm text-foreground focus:border-aged-gold focus:outline-none"
-                  />
-                </label>
-                <label className="space-y-2">
-                  <Data className="text-gg-muted block text-xs">Policies</Data>
-                  <input
-                    value={insurancePolicyCount}
-                    onChange={(e) => setInsurancePolicyCount(e.target.value)}
-                    inputMode="numeric"
-                    className="h-11 w-full rounded-xl border border-gg-border/50 bg-gg-surface/30 px-4 text-sm text-foreground focus:border-aged-gold focus:outline-none"
-                  />
-                </label>
-                <label className="space-y-2">
-                  <Data className="text-gg-muted block text-xs">Frequency Lambda</Data>
-                  <input
-                    value={insuranceLambda}
-                    onChange={(e) => setInsuranceLambda(e.target.value)}
-                    inputMode="decimal"
-                    className="h-11 w-full rounded-xl border border-gg-border/50 bg-gg-surface/30 px-4 text-sm text-foreground focus:border-aged-gold focus:outline-none"
-                  />
-                </label>
-                <label className="space-y-2">
-                  <Data className="text-gg-muted block text-xs">Base Premium Bps</Data>
-                  <input
-                    value={insurancePremiumBps}
-                    onChange={(e) => setInsurancePremiumBps(e.target.value)}
-                    inputMode="numeric"
-                    className="h-11 w-full rounded-xl border border-gg-border/50 bg-gg-surface/30 px-4 text-sm text-foreground focus:border-aged-gold focus:outline-none"
-                  />
-                </label>
+              <div className="mt-5 grid gap-3 sm:grid-cols-2">
+                <div className="rounded-xl border border-gg-border/50 bg-gg-surface/30 p-4">
+                  <Data className="text-gg-muted block text-xs mb-1">Configured Periods</Data>
+                  <div className="text-lg font-bold text-aged-gold tabular-nums">{insurancePeriods}</div>
+                </div>
+                <div className="rounded-xl border border-gg-border/50 bg-gg-surface/30 p-4">
+                  <Data className="text-gg-muted block text-xs mb-1">Configured Policies</Data>
+                  <div className="text-lg font-bold text-aged-gold tabular-nums">{insurancePolicyCount}</div>
+                </div>
               </div>
 
-              <button
-                type="button"
-                onClick={() => void runInsuranceScenario()}
-                disabled={insuranceBusy}
-                className="mt-5 inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl border border-gg-border/50 bg-gg-surface/30 px-4 text-sm font-semibold text-foreground transition-colors hover:border-aged-gold/50 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                <Play className="h-4 w-4 text-aged-gold" />
-                {insuranceBusy ? "Running Scenario..." : "Run Insurance Scenario"}
-              </button>
+              {insuranceReport ? (
+                <div className="mt-4 rounded-xl border border-gg-border/50 bg-gg-surface/30 p-4">
+                  <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
+                    <FileText className="h-4 w-4 text-aged-gold" />
+                    Latest Report
+                  </div>
+                  <div className="mt-3 grid gap-2 text-sm text-gg-muted">
+                    <div>Premiums: {formatNumber(insuranceReport.metrics?.premiumCollectedUnits ?? 0, { maximumFractionDigits: 2 })}</div>
+                    <div>Payouts: {formatNumber(insuranceReport.metrics?.paidPayoutUnits ?? 0, { maximumFractionDigits: 2 })}</div>
+                    <div>Validation: {insuranceReport.validation?.pass ? "pass" : "fail"}</div>
+                  </div>
+                </div>
+              ) : null}
 
               {insuranceError ? (
                 <div className="mt-4 rounded-xl border border-gg-border/50 bg-ember-red/10 p-4 text-sm text-ember-red">
@@ -811,71 +822,166 @@ export default function DashboardPage() {
                 </div>
               ) : null}
 
-              {insuranceReport ? (
-                <div className="mt-5 space-y-4">
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <div className="rounded-xl border border-gg-border/50 bg-gg-surface/30 p-4">
-                      <Data className="text-gg-muted block text-xs mb-1">Premium Collected</Data>
-                      <div className="text-lg font-bold text-aged-gold tabular-nums">
-                        {formatNumber(insuranceReport.metrics?.premiumCollectedUnits ?? 0, { maximumFractionDigits: 2 })}
-                      </div>
-                    </div>
-                    <div className="rounded-xl border border-gg-border/50 bg-gg-surface/30 p-4">
-                      <Data className="text-gg-muted block text-xs mb-1">Paid Payout</Data>
-                      <div className="text-lg font-bold text-aged-gold tabular-nums">
-                        {formatNumber(insuranceReport.metrics?.paidPayoutUnits ?? 0, { maximumFractionDigits: 2 })}
-                      </div>
-                    </div>
-                    <div className="rounded-xl border border-gg-border/50 bg-gg-surface/30 p-4">
-                      <Data className="text-gg-muted block text-xs mb-1">Loss Coverage Ratio</Data>
-                      <div className="text-lg font-bold text-aged-gold tabular-nums">
-                        {formatNumber((insuranceReport.metrics?.lossCoverageRatio ?? 0) * 100, {
-                          maximumFractionDigits: 2,
-                        })}
-                        %
-                      </div>
-                    </div>
-                    <div className="rounded-xl border border-gg-border/50 bg-gg-surface/30 p-4">
-                      <Data className="text-gg-muted block text-xs mb-1">Reactive Success</Data>
-                      <div className="text-lg font-bold text-aged-gold tabular-nums">
-                        {formatNumber((insuranceReport.metrics?.reactiveActivationSuccessRate ?? 0) * 100, {
-                          maximumFractionDigits: 2,
-                        })}
-                        %
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="rounded-xl border border-gg-border/50 bg-gg-surface/30 p-4">
-                    <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
-                      <FileText className="h-4 w-4 text-aged-gold" />
-                      Report Summary
-                    </div>
-                    <div className="mt-3 space-y-2 text-sm text-gg-muted">
-                      <div>Loss events: {insuranceReport.claims?.generatedLossEvents ?? 0}</div>
-                      <div>Claims paid: {insuranceReport.claims?.paid ?? 0}</div>
-                      <div>Pending claims: {insuranceReport.claims?.pending ?? 0}</div>
-                      <div>Validation: {insuranceReport.validation?.pass ? "pass" : "fail"}</div>
-                      <div>Events logged: {insuranceReport.eventsLogged ?? 0}</div>
-                    </div>
-                  </div>
-
-                  {insuranceMarkdown ? (
-                    <details className="rounded-xl border border-gg-border/50 bg-gg-surface/30 p-4">
-                      <summary className="cursor-pointer text-sm font-semibold text-foreground">
-                        Report-ready Markdown
-                      </summary>
-                      <pre className="mt-3 overflow-x-auto whitespace-pre-wrap text-xs text-gg-muted">
-                        {insuranceMarkdown}
-                      </pre>
-                    </details>
-                  ) : null}
-                </div>
-              ) : null}
+              <button
+                type="button"
+                onClick={() => setInsuranceModalOpen(true)}
+                className="mt-5 inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl border border-gg-border/50 bg-gg-surface/30 px-4 text-sm font-semibold text-foreground transition-colors hover:border-aged-gold/50"
+              >
+                <Play className="h-4 w-4 text-aged-gold" />
+                Open Scenario Builder
+              </button>
             </RuneStone>
           </aside>
         </div>
       </div>
+
+      {insuranceModalOpen ? (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/70 px-4 py-6 backdrop-blur-sm">
+          <div className="absolute inset-0" onClick={() => setInsuranceModalOpen(false)} />
+          <div className="relative z-[71] max-h-[90vh] w-full max-w-4xl overflow-y-auto rounded-3xl border border-gg-border/60 bg-gg-bg/95 p-6 shadow-[0_24px_80px_rgba(0,0,0,0.55)] backdrop-blur-xl sm:p-8">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <Subhead className="text-lg">Insurance Scenario Builder</Subhead>
+                <Body className="mt-2 text-gg-muted text-sm">
+                  Run stochastic insurance scenarios and inspect the latest premium, payout, and reactive trigger results.
+                </Body>
+              </div>
+              <button
+                type="button"
+                onClick={() => setInsuranceModalOpen(false)}
+                className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-gg-border/50 bg-gg-surface/30 text-foreground transition-colors hover:border-aged-gold/50"
+                aria-label="Close insurance scenario modal"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="mt-6 flex items-center justify-between gap-4 flex-wrap">
+              <Beacon
+                status={insuranceBusy ? "warning" : insuranceReport ? "active" : "neutral"}
+                label={insuranceBusy ? "Running" : insuranceReport ? "Report ready" : "Idle"}
+              />
+              <button
+                type="button"
+                onClick={() => void runInsuranceScenario()}
+                disabled={insuranceBusy}
+                className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-gg-border/50 bg-gg-surface/30 px-4 text-sm font-semibold text-foreground transition-colors hover:border-aged-gold/50 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <Play className="h-4 w-4 text-aged-gold" />
+                {insuranceBusy ? "Running Scenario..." : "Run Insurance Scenario"}
+              </button>
+            </div>
+
+            <div className="mt-6 grid gap-3 sm:grid-cols-2">
+              <label className="space-y-2">
+                <Data className="text-gg-muted block text-xs">Periods</Data>
+                <input
+                  value={insurancePeriods}
+                  onChange={(e) => setInsurancePeriods(e.target.value)}
+                  inputMode="numeric"
+                  className="h-11 w-full rounded-xl border border-gg-border/50 bg-gg-surface/30 px-4 text-sm text-foreground focus:border-aged-gold focus:outline-none"
+                />
+              </label>
+              <label className="space-y-2">
+                <Data className="text-gg-muted block text-xs">Policies</Data>
+                <input
+                  value={insurancePolicyCount}
+                  onChange={(e) => setInsurancePolicyCount(e.target.value)}
+                  inputMode="numeric"
+                  className="h-11 w-full rounded-xl border border-gg-border/50 bg-gg-surface/30 px-4 text-sm text-foreground focus:border-aged-gold focus:outline-none"
+                />
+              </label>
+              <label className="space-y-2">
+                <Data className="text-gg-muted block text-xs">Frequency Lambda</Data>
+                <input
+                  value={insuranceLambda}
+                  onChange={(e) => setInsuranceLambda(e.target.value)}
+                  inputMode="decimal"
+                  className="h-11 w-full rounded-xl border border-gg-border/50 bg-gg-surface/30 px-4 text-sm text-foreground focus:border-aged-gold focus:outline-none"
+                />
+              </label>
+              <label className="space-y-2">
+                <Data className="text-gg-muted block text-xs">Base Premium Bps</Data>
+                <input
+                  value={insurancePremiumBps}
+                  onChange={(e) => setInsurancePremiumBps(e.target.value)}
+                  inputMode="numeric"
+                  className="h-11 w-full rounded-xl border border-gg-border/50 bg-gg-surface/30 px-4 text-sm text-foreground focus:border-aged-gold focus:outline-none"
+                />
+              </label>
+            </div>
+
+            {insuranceError ? (
+              <div className="mt-4 rounded-xl border border-gg-border/50 bg-ember-red/10 p-4 text-sm text-ember-red">
+                <p className="font-semibold mb-1">Simulation Error</p>
+                {insuranceError}
+              </div>
+            ) : null}
+
+            {insuranceReport ? (
+              <div className="mt-6 space-y-4">
+                <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                  <div className="rounded-xl border border-gg-border/50 bg-gg-surface/30 p-4">
+                    <Data className="text-gg-muted block text-xs mb-1">Premium Collected</Data>
+                    <div className="text-lg font-bold text-aged-gold tabular-nums">
+                      {formatNumber(insuranceReport.metrics?.premiumCollectedUnits ?? 0, { maximumFractionDigits: 2 })}
+                    </div>
+                  </div>
+                  <div className="rounded-xl border border-gg-border/50 bg-gg-surface/30 p-4">
+                    <Data className="text-gg-muted block text-xs mb-1">Paid Payout</Data>
+                    <div className="text-lg font-bold text-aged-gold tabular-nums">
+                      {formatNumber(insuranceReport.metrics?.paidPayoutUnits ?? 0, { maximumFractionDigits: 2 })}
+                    </div>
+                  </div>
+                  <div className="rounded-xl border border-gg-border/50 bg-gg-surface/30 p-4">
+                    <Data className="text-gg-muted block text-xs mb-1">Loss Coverage Ratio</Data>
+                    <div className="text-lg font-bold text-aged-gold tabular-nums">
+                      {formatNumber((insuranceReport.metrics?.lossCoverageRatio ?? 0) * 100, {
+                        maximumFractionDigits: 2,
+                      })}
+                      %
+                    </div>
+                  </div>
+                  <div className="rounded-xl border border-gg-border/50 bg-gg-surface/30 p-4">
+                    <Data className="text-gg-muted block text-xs mb-1">Reactive Success</Data>
+                    <div className="text-lg font-bold text-aged-gold tabular-nums">
+                      {formatNumber((insuranceReport.metrics?.reactiveActivationSuccessRate ?? 0) * 100, {
+                        maximumFractionDigits: 2,
+                      })}
+                      %
+                    </div>
+                  </div>
+                </div>
+
+                <div className="rounded-xl border border-gg-border/50 bg-gg-surface/30 p-4">
+                  <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
+                    <FileText className="h-4 w-4 text-aged-gold" />
+                    Report Summary
+                  </div>
+                  <div className="mt-3 grid gap-2 text-sm text-gg-muted sm:grid-cols-2">
+                    <div>Loss events: {insuranceReport.claims?.generatedLossEvents ?? 0}</div>
+                    <div>Claims paid: {insuranceReport.claims?.paid ?? 0}</div>
+                    <div>Pending claims: {insuranceReport.claims?.pending ?? 0}</div>
+                    <div>Validation: {insuranceReport.validation?.pass ? "pass" : "fail"}</div>
+                    <div>Events logged: {insuranceReport.eventsLogged ?? 0}</div>
+                  </div>
+                </div>
+
+                {insuranceMarkdown ? (
+                  <details className="rounded-xl border border-gg-border/50 bg-gg-surface/30 p-4">
+                    <summary className="cursor-pointer text-sm font-semibold text-foreground">
+                      Report-ready Markdown
+                    </summary>
+                    <pre className="mt-3 overflow-x-auto whitespace-pre-wrap text-xs text-gg-muted">
+                      {insuranceMarkdown}
+                    </pre>
+                  </details>
+                ) : null}
+              </div>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

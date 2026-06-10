@@ -761,9 +761,16 @@ contract GoldgardHook is BaseHook, Ownable2Step, IUnlockCallback {
         uint256 amountOut = _rebalanceSwap(key, zeroForOne, amountIn);
 
         Transient.tstoreU256(TS_REBALANCE_AMOUNT_OUT, amountOut);
-        Transient.tstoreU256(TS_REBALANCE_IN_PROGRESS, 0);
+        _clearTransientRebalanceState();
 
         return abi.encode(amountOut);
+    }
+
+    /// @dev Clears all transient rebalance slots before control returns to outer frames.
+    function _clearTransientRebalanceState() internal {
+        Transient.tstoreU256(TS_REBALANCE_IN_PROGRESS, 0);
+        Transient.tstoreU256(TS_REBALANCE_AMOUNT_IN, 0);
+        Transient.tstoreU256(TS_REBALANCE_AMOUNT_OUT, 0);
     }
 
     /// @dev Performs the actual swap leg of the rebalance and settles the reserve-facing transfers.

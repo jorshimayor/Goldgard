@@ -4,8 +4,9 @@ import Link from "next/link";
 import { ConnectButton } from "@rainbow-me/rainbowkit";
 import { Menu, X } from "lucide-react";
 import { useState } from "react";
-import { getDemoConfigForChain } from "../lib/demoConfig";
+import { useChainId } from "wagmi";
 import { Data } from "./DesignComponents";
+import { chainLabel, supportedChains } from "../lib/networks";
 
 const links = [
   { href: "/", label: "Landing" },
@@ -15,8 +16,10 @@ const links = [
 
 export function Nav() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const cfg = getDemoConfigForChain(11155111);
-  const netLabel = cfg.chainId === 11155111 ? "Sepolia" : `Chain ${cfg.chainId}`;
+  const chainId = useChainId();
+  const netLabel = supportedChains.some((chain) => chain.id === chainId)
+    ? chainLabel(chainId)
+    : "Unsupported Network";
 
   return (
     <header className="sticky top-0 z-50 border-b border-gg-border bg-gg-bg/95 backdrop-blur-2xl shadow-gg transition-all duration-300">
@@ -43,9 +46,9 @@ export function Nav() {
 
         {/* Right Section */}
         <div className="flex items-center gap-3 sm:gap-4">
-          <Data className="hidden rounded-full border border-gg-gold/30 bg-gg-surface/50 px-3 py-1.5 text-xs font-semibold text-gg-gold sm:inline backdrop-blur-sm">
+          {/* <Data className="hidden rounded-full border border-gg-gold/30 bg-gg-surface/50 px-3 py-1.5 text-xs font-semibold text-gg-gold sm:inline backdrop-blur-sm">
             {netLabel}
-          </Data>
+          </Data> */}
           <ConnectButton showBalance={false} />
           
           {/* Mobile Menu Button */}
