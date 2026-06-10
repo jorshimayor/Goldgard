@@ -7,7 +7,13 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "e2e": "playwright test"
+    "e2e": "playwright test",
+    "e2e:dashboard": "playwright test e2e/dashboard.spec.ts",
+    "simulate:insurance": "node scripts/simulate-insurance.mjs",
+    "simulate:testnet:rerun": "node scripts/rerun-testnet-simulations.mjs",
+    "test:insurance-sim": "node --test scripts/insuranceSimulation.test.mjs",
+    "validate:reactive": "node scripts/e2e-dashboard.mjs",
+    "validate:reactive:browser": "node scripts/validate-reactive-browser.mjs"
   },
   "dependencies": {
     "@rainbow-me/rainbowkit": "^2.2.5",

@@ -12,3 +12,5 @@ docs/
 
 # Dotenv file
 .env
+
+/REACTIVE_SURFACE_AND_DEPLOYMENT.md/

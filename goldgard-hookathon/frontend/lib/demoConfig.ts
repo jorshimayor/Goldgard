@@ -1,11 +1,16 @@
 import { z } from "zod";
 
+import local from "../app/config/demoConfig.local.json";
 import sepolia from "../app/config/demoConfig.sepolia.json";
 
 const ZERO = "0x0000000000000000000000000000000000000000";
 
 const DemoConfigSchema = z.object({
   callbackReceiver: z.string().optional(),
+  reactiveWatcher: z.string().optional(),
+  reactiveOriginChainId: z.number().optional(),
+  reactiveDestinationChainId: z.number().optional(),
+  reactiveCallbackGasLimit: z.number().optional(),
   chainId: z.number(),
   deployer: z.string(),
   poolManager: z.string(),
@@ -31,6 +36,7 @@ export type DemoConfig = z.infer<typeof DemoConfigSchema>;
 function emptyConfig(chainId: number): DemoConfig {
   return DemoConfigSchema.parse({
     chainId,
+    reactiveWatcher: ZERO,
     deployer: ZERO,
     poolManager: ZERO,
     stateView: ZERO,
@@ -53,6 +59,7 @@ function emptyConfig(chainId: number): DemoConfig {
 
 export function getDemoConfigForChain(chainId?: number): DemoConfig {
   if (chainId === undefined || chainId === sepolia.chainId) return DemoConfigSchema.parse(sepolia);
+  if (chainId === local.chainId) return DemoConfigSchema.parse(local);
   if (chainId !== undefined) return emptyConfig(chainId);
   return DemoConfigSchema.parse(sepolia);
 }

@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import { useAccount, useChainId, usePublicClient, useWriteContract } from "wagmi";
 import { parseUnits } from "viem";
-import { ArrowRight, CheckCircle2, CircleDashed, ExternalLink, Flame, Shield } from "lucide-react";
+import { ArrowRight, CheckCircle2, CircleDashed, ExternalLink, Flame } from "lucide-react";
 import { Display, Subhead, Body, Data, RuneStone, LeverageRune } from "@/components/DesignComponents";
 
 import { getDemoConfigForChain, isConfiguredAddress } from "../../lib/demoConfig";
@@ -135,10 +135,10 @@ export default function DemoConsolePage() {
       <div className="mx-auto w-full max-w-3xl">
         {/* Header */}
         <div className="mb-10">
-          <div className="inline-flex items-center gap-2 rounded-full border border-aged-gold/30 bg-gg-surface/55 px-4 py-2 text-xs font-semibold text-aged-gold backdrop-blur-sm mb-4">
+          {/* <div className="inline-flex items-center gap-2 rounded-full border border-aged-gold/30 bg-gg-surface/55 px-4 py-2 text-xs font-semibold text-aged-gold backdrop-blur-sm mb-4">
             <Shield className="h-3.5 w-3.5" />
             Atomic swap → rebalance → premium
-          </div>
+          </div> */}
           <Display variant="xl" className="mb-4">
             Demo Console
           </Display>

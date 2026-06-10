@@ -119,6 +119,7 @@ contract GoldgardGasTest is Test {
             .PoolOracleConfig({
                 aggregator: IChainlinkAggregatorV3(address(agg)),
                 maxStaleSeconds: 3600,
+                maxPoolStaleSeconds: 3600,
                 aggregatorDecimals: 8,
                 token0Decimals: 18,
                 token1Decimals: 18

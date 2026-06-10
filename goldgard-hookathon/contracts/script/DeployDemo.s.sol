@@ -74,6 +74,8 @@ contract DeployDemo is Script {
     MockERC20 internal token0;
     MockERC20 internal token1;
     MockAggregatorV3 internal agg;
+    IChainlinkAggregatorV3 internal configuredAggregator;
+    address internal configuredAggregatorAddress;
     OracleAdapter internal oracle;
     SafetyModule internal safety;
     HedgeReserve internal hedge;
@@ -117,7 +119,15 @@ contract DeployDemo is Script {
         token0.mint(deployer, 1_000_000e18);
         token1.mint(deployer, 1_000_000e18);
 
-        agg = new MockAggregatorV3(8, 1e8);
+        address liveAggregator = vm.envOr("CHAINLINK_AGGREGATOR", address(0));
+        if (liveAggregator != address(0)) {
+            configuredAggregator = IChainlinkAggregatorV3(liveAggregator);
+            configuredAggregatorAddress = liveAggregator;
+        } else {
+            agg = new MockAggregatorV3(8, 1e8);
+            configuredAggregator = IChainlinkAggregatorV3(address(agg));
+            configuredAggregatorAddress = address(agg);
+        }
         oracle = new OracleAdapter(deployer);
         safety = new SafetyModule(
             deployer,
@@ -172,9 +182,10 @@ contract DeployDemo is Script {
         });
 
         OracleAdapter.PoolOracleConfig memory oCfg = OracleAdapter.PoolOracleConfig({
-            aggregator: IChainlinkAggregatorV3(address(agg)),
-            maxStaleSeconds: 3600,
-            aggregatorDecimals: 8,
+            aggregator: configuredAggregator,
+            maxStaleSeconds: uint32(vm.envOr("CHAINLINK_MAX_STALE_SECONDS", uint256(3600))),
+            maxPoolStaleSeconds: uint32(vm.envOr("POOL_MAX_STALE_SECONDS", uint256(3600))),
+            aggregatorDecimals: uint8(vm.envOr("CHAINLINK_AGGREGATOR_DECIMALS", uint256(8))),
             token0Decimals: 18,
             token1Decimals: 18
         });
@@ -233,6 +244,7 @@ contract DeployDemo is Script {
         vm.serializeAddress(root, "token0", address(token0));
         vm.serializeAddress(root, "token1", address(token1));
         vm.serializeAddress(root, "mockAggregator", address(agg));
+        vm.serializeAddress(root, "priceAggregator", configuredAggregatorAddress);
         vm.serializeUint(
             root,
             "tickSpacing",

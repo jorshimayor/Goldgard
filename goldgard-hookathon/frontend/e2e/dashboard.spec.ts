@@ -1,5 +1,13 @@
 import { expect, test } from "@playwright/test";
 
+const testChainId = Number(process.env.TEST_CHAIN_ID ?? "11155111");
+const expectedChainHex =
+  process.env.EXPECTED_CHAIN_HEX ??
+  (testChainId === 11155111 ? "0xaa36a7" : testChainId === 31337 ? "0x7a69" : "");
+const expectedNetworkLabel =
+  process.env.EXPECTED_NETWORK_LABEL ?? (testChainId === 31337 ? "Local Anvil" : "Sepolia");
+const uiTimeoutMs = Number(process.env.UI_TIMEOUT_MS ?? "15000");
+
 async function rpc(page: any, chainId: number, method: string, params: unknown[] = []) {
   const res = await page.request.post(`/api/rpc/${chainId}`, {
     data: { jsonrpc: "2.0", id: 1, method, params },
@@ -30,22 +38,27 @@ async function waitForBlockToMatch(page: any, expected: bigint) {
 }
 
 test("dashboard uses live RPC data and switches networks", async ({ page }: { page: any }) => {
-  await page.goto("/dashboard", { waitUntil: "domcontentloaded" });
+  await page.goto(`/dashboard?chainId=${testChainId}`, { waitUntil: "domcontentloaded" });
 
   const select = page.getByTestId("network-select");
-  await expect(select).toBeVisible();
-  await expect(select).toContainText("Sepolia");
+  await expect(select).toBeVisible({ timeout: uiTimeoutMs });
+  await expect(select).toContainText(expectedNetworkLabel);
 
-  await expect(page.getByTestId("rpc-status")).toContainText(/RPC ok|Sync stalled/);
+  await expect(page.getByTestId("rpc-status")).toContainText(/RPC ok|Sync stalled/, {
+    timeout: uiTimeoutMs,
+  });
+  await expect(page.getByTestId("events-status")).toContainText(/Events ok|Events degraded|Events off/, {
+    timeout: uiTimeoutMs,
+  });
 
-  const ok = await chainConfigured(page, 11155111, "0xaa36a7");
+  const ok = await chainConfigured(page, testChainId, expectedChainHex);
   expect(ok).toBeTruthy();
 
-  const r = await rpc(page, 11155111, "eth_chainId");
+  const r = await rpc(page, testChainId, "eth_chainId");
   expect(r.ok).toBeTruthy();
-  expect(r.json.result).toBe("0xaa36a7");
+  expect(r.json.result).toBe(expectedChainHex);
 
-  const bn = await rpc(page, 11155111, "eth_blockNumber");
+  const bn = await rpc(page, testChainId, "eth_blockNumber");
   expect(bn.ok).toBeTruthy();
   const latest = BigInt(bn.json.result);
   await waitForBlockToMatch(page, latest);
@@ -55,8 +68,9 @@ test("dashboard uses live RPC data and switches networks", async ({ page }: { pa
 });
 
 test("dashboard remains responsive under live polling", async ({ page }: { page: any }) => {
-  await page.goto("/dashboard", { waitUntil: "domcontentloaded" });
-  await expect(page.getByTestId("rpc-status")).toBeVisible();
+  await page.goto(`/dashboard?chainId=${testChainId}`, { waitUntil: "domcontentloaded" });
+  await expect(page.getByTestId("rpc-status")).toBeVisible({ timeout: uiTimeoutMs });
+  await expect(page.getByTestId("events-status")).toBeVisible({ timeout: uiTimeoutMs });
 
   const fps = await page.evaluate(async () => {
     const start = performance.now();

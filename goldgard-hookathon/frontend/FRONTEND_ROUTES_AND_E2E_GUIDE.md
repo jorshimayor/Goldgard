@@ -16,6 +16,9 @@
   - “Reactive Sentinel” rune indicator:
     - Reads GoldgardHook.getReactiveAlert() and renders a glowing rune while active.
   - Live time-series chart (in-memory rolling series from on-chain reads; refresh ≤ 5s).
+  - Insurance simulation panel:
+    - Calls `POST /api/insurance-simulate`
+    - Returns a report-ready Markdown summary plus JSON metrics
 - Contract reads:
   - SafetyModule.totalAssets()
   - SafetyModule.asset() → ERC20.decimals()/symbol() (for correct unit formatting)
@@ -36,17 +39,23 @@
 
 ## 2) How the Frontend Connects to Contracts
 
-### Config selection (Sepolia-only)
-- Frontend uses Sepolia config:
-  - `app/config/demoConfig.sepolia.json`
+### Config selection (Multi-chain)
+- Frontend selects config by chainId:
+  - Sepolia: `app/config/demoConfig.sepolia.json` (chainId 11155111)
+  - Local Anvil: `app/config/demoConfig.local.json` (chainId 31337)
 - Source: [demoConfig.ts](file:///home/jorel/Goldgard/goldgard-hookathon/frontend/lib/demoConfig.ts)
 
-### RPC routing (Sepolia-only) and secret handling
+### RPC routing (Multi-chain) and secret handling
 - Client-side reads/writes use wagmi, but **all public RPC reads** are routed through a same-origin JSON-RPC proxy:
   - `POST /api/rpc/<chainId>`
   - Implementation: [route.ts](file:///home/jorel/Goldgard/goldgard-hookathon/frontend/app/api/rpc/%5BchainId%5D/route.ts)
 - The proxy forwards to a server-only environment variable:
-  - `SEPOLIA_RPC_URL`
+  - `SEPOLIA_RPC_URL` (11155111)
+  - `LOCAL_RPC_URL` (31337)
+  - `BASE_SEPOLIA_RPC_URL` (84532)
+  - `OPTIMISM_SEPOLIA_RPC_URL` (11155420)
+  - `ARBITRUM_SEPOLIA_RPC_URL` (421614)
+  - `POLYGON_AMOY_RPC_URL` (80002)
 - This keeps API keys off the client; the browser only sees `/api/rpc/<chainId>`.
 - The proxy validates `eth_chainId` responses and returns an error on chainId mismatches to prevent cross-network data confusion.
 
@@ -58,19 +67,20 @@
 - Provider setup: [providers.tsx](file:///home/jorel/Goldgard/goldgard-hookathon/frontend/app/providers.tsx)
 
 ### Event listening logic
-- Dashboard uses a 5s-or-less refresh budget:
-  - Polling contract reads via wagmi query `refetchInterval` (≤ 5s).
-  - Optional WebSocket block subscription when a WS endpoint is configured:
-    - `NEXT_PUBLIC_SEPOLIA_WS_RPC_URL`
-    - WS endpoints that appear to be keyed (Alchemy/Infura/QuickNode URL patterns) are ignored to avoid client-side key exposure.
-  - If WS is not configured, the dashboard still stays within the refresh budget via polling.
+- Dashboard listens to on-chain events via a server-side SSE stream:
+  - `GET /api/events/<chainId>`
+  - Implementation: [route.ts](file:///home/jorel/Goldgard/goldgard-hookathon/frontend/app/api/events/%5BchainId%5D/route.ts)
+- The stream performs bounded backfill (`eth_getLogs`) and then continuous polling, emitting decoded events as they arrive.
+- Frontend maintains a lightweight cursor per chainId to reduce missed events on refresh/reconnect.
+- Polling reads (≤ 5s) remain as a correctness fallback and for non-event state.
 
 ### Network selection + validation
-- The app is locked to Sepolia for testing and demos.
-- When a wallet is connected, the UI will prompt to switch the wallet network to Sepolia and keep it there.
+- Dashboard supports selecting a view chain via `?chainId=<id>` (default: Sepolia).
+- When a wallet is connected, the UI attempts to switch the wallet network to the selected view chain.
 - Health checks:
   - `RPC ok/degraded` is derived from calling `eth_chainId` through `/api/rpc/<chainId>` and verifying it matches the selected chainId.
   - `Sync stalled` is raised if the block feed stops updating for an extended period while RPC is otherwise healthy.
+  - `Events ok/degraded` is derived from the SSE heartbeat and log ingestion continuity.
 
 ## 3) Sepolia End-to-End Guide
 
@@ -97,6 +107,46 @@ This writes:
 - `/demo`:
   - Approve and swap with your Sepolia wallet.
   - Confirm tx receipts on Etherscan.
+
+### Validate reactive APIs
+- API smoke test:
+  ```bash
+  BASE_URL=http://127.0.0.1:3002 CHAIN_ID=31337 SIMULATE=true pnpm validate:reactive
+  ```
+- Browser smoke test:
+  ```bash
+  BASE_URL=http://127.0.0.1:3002 CHAIN_ID=31337 EXPECTED_NETWORK_LABEL="Local Anvil" pnpm validate:reactive:browser
+  ```
+- These cover:
+  - `/api/rpc/<chainId>` health
+  - `/api/events/<chainId>` SSE heartbeat
+  - dashboard rendering of network / RPC / events state
+  - local simulation trigger path through `/api/simulate`
+
+### Simulation endpoint
+- `POST /api/simulate` supports:
+  - `chainId=11155111` using `SEPOLIA_RPC_URL` + `SEPOLIA_PRIVATE_KEY`
+  - `chainId=31337` using `LOCAL_RPC_URL` + `LOCAL_PRIVATE_KEY` (or default Anvil key)
+- The endpoint now runs Foundry from `contracts/`, which is required for remapping resolution.
+
+### Insurance simulation endpoint
+- `POST /api/insurance-simulate`
+- Purpose:
+  - run the actuarial/off-chain insurance simulation from the app UI
+  - return structured report metrics and report-ready Markdown
+
+### Testnet rerun capture endpoint
+- `POST /api/testnet-simulations`
+- Purpose:
+  - rerun mined Sepolia simulation cases
+  - verify receipts are mined
+  - capture block number, timestamp, gas usage, and raw logs
+  - persist centralized artifacts:
+    - `TESTNET_SIMULATION_RERUNS.md`
+    - `TESTNET_SIMULATION_RERUNS.json`
+- Required env:
+  - `SEPOLIA_RPC_URL`
+  - `SEPOLIA_PRIVATE_KEY` or `PRIVATE_KEY`
 
 ## 5) Presentation Walkthrough (Suggested Script)
 
@@ -131,6 +181,7 @@ This writes:
   - `RPC degraded` means the active chain proxy is misconfigured or unreachable.
 
 ### E2E network smoke check
+- Existing Playwright coverage remains useful for manual/browser CI runs, but the repo now also includes a lighter browser validator (`validate:reactive:browser`) that is less sensitive to dev-server startup timing during local staging checks.
 With the frontend server running, execute:
 ```bash
 node scripts/e2e-dashboard.mjs

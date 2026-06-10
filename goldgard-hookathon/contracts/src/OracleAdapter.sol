@@ -14,9 +14,13 @@ import {PoolKey} from "v4-core/types/PoolKey.sol";
 import {PoolId, PoolIdLibrary} from "v4-core/types/PoolId.sol";
 import {IPoolManager} from "v4-core/interfaces/IPoolManager.sol";
 import {StateLibrary} from "v4-core/libraries/StateLibrary.sol";
+import {FullMath} from "v4-core/libraries/FullMath.sol";
 
 import {IChainlinkAggregatorV3} from "./interfaces/IChainlinkAggregatorV3.sol";
 
+/// @title Goldgard Oracle Adapter
+/// @notice Combines a pool-derived TWAP with an external Chainlink-style feed
+///         and exposes a live-safe reference price for the rest of the system.
 contract OracleAdapter is Ownable2Step {
     using PoolIdLibrary for PoolKey;
     using StateLibrary for IPoolManager;
@@ -35,14 +39,17 @@ contract OracleAdapter is Ownable2Step {
     uint8 internal constant OBSERVATION_CARDINALITY = 32;
     uint32 public constant MIN_TWAP_WINDOW_SECONDS = 10 minutes;
 
+    /// @notice Per-pool config for feed selection, freshness, and decimal normalization.
     struct PoolOracleConfig {
         IChainlinkAggregatorV3 aggregator;
         uint32 maxStaleSeconds;
+        uint32 maxPoolStaleSeconds;
         uint8 aggregatorDecimals;
         uint8 token0Decimals;
         uint8 token1Decimals;
     }
 
+    /// @notice Single ring-buffer observation used to reconstruct TWAP state.
     struct Observation {
         uint64 timestamp;
         uint256 sqrtPriceX96Cumulative;
@@ -53,6 +60,7 @@ contract OracleAdapter is Ownable2Step {
     mapping(PoolId => PoolOracleConfig) public poolOracle;
     mapping(PoolId => Observation[OBSERVATION_CARDINALITY]) internal observations;
 
+    /// @notice Rolling pool-side state used to maintain TWAP observations.
     struct PoolState {
         uint64 lastUpdated;
         uint160 lastSqrtPriceX96;
@@ -65,27 +73,33 @@ contract OracleAdapter is Ownable2Step {
 
     constructor(address _owner) Ownable(_owner) {}
 
+    /// @notice Sets the hook that is allowed to push pool observations into the adapter.
     function setHook(address _hook) external onlyOwner {
         hook = _hook;
     }
 
+    /// @notice Configures the external feed and freshness windows for a pool.
     function setPoolOracleConfig(
         PoolKey calldata key,
         PoolOracleConfig calldata cfg
     ) external onlyOwner {
         if (cfg.maxStaleSeconds == 0) revert BadConfig();
+        if (cfg.maxPoolStaleSeconds == 0) revert BadConfig();
         if (cfg.aggregatorDecimals > 30) revert BadConfig();
         if (cfg.token0Decimals > 30) revert BadConfig();
         if (cfg.token1Decimals > 30) revert BadConfig();
         poolOracle[key.toId()] = PoolOracleConfig({
             aggregator: cfg.aggregator,
             maxStaleSeconds: cfg.maxStaleSeconds,
+            maxPoolStaleSeconds: cfg.maxPoolStaleSeconds,
             aggregatorDecimals: cfg.aggregatorDecimals,
             token0Decimals: cfg.token0Decimals,
             token1Decimals: cfg.token1Decimals
         });
     }
 
+    /// @notice Captures the latest pool price and appends it to the TWAP history.
+    /// @dev Called by the hook during pool activity so the fallback path stays fresh.
     function updateFromPool(
         IPoolManager manager,
         PoolKey calldata key
@@ -145,6 +159,7 @@ contract OracleAdapter is Ownable2Step {
         }
     }
 
+    /// @notice Returns the pool-side TWAP sqrt price for the requested window.
     function getTwapSqrtPriceX96(
         PoolKey calldata key,
         uint32 windowSeconds
@@ -182,6 +197,9 @@ contract OracleAdapter is Ownable2Step {
         return SafeCast.toUint160(avg);
     }
 
+    /// @notice Reads and normalizes the configured external feed into sqrt-price form.
+    /// @return sqrtPriceX96 External price converted into Uniswap sqrt-price notation.
+    /// @return ok True only when the feed is configured, positive, and fresh enough.
     function getChainlinkSqrtPriceX96(
         PoolKey calldata key
     ) public view returns (uint160 sqrtPriceX96, bool ok) {
@@ -235,34 +253,63 @@ contract OracleAdapter is Ownable2Step {
         return (SafeCast.toUint160(sqrtRatioX96), true);
     }
 
+    /// @notice Returns a 1e18 reference price using fresh Chainlink first, then fresh TWAP.
     function getPrice1e18(
         PoolKey calldata key,
         uint32 twapWindowSeconds
     ) external view returns (uint256 price1e18) {
-        (uint160 cl, bool ok) = getChainlinkSqrtPriceX96(key);
-        uint160 sqrtPriceX96 = ok
-            ? cl
-            : getTwapSqrtPriceX96(key, twapWindowSeconds);
+        (uint160 sqrtPriceX96, ) = getReferenceSqrtPriceX96(key, twapWindowSeconds);
         if (sqrtPriceX96 == 0) return 0;
-        uint256 price = Math.mulDiv(
-            uint256(sqrtPriceX96),
-            uint256(sqrtPriceX96),
-            uint256(1) << 192
-        );
-        return Math.mulDiv(price, 1e18, 1);
+        return _price1e18FromSqrt(sqrtPriceX96);
     }
 
+    /// @notice Returns the strict reference price required by core contract flows.
+    /// @dev Reverts only when both Chainlink and the TWAP fallback are stale or missing.
     function getPrice1e18Strict(
         PoolKey calldata key
     ) external view returns (uint256 price1e18) {
-        (uint160 cl, bool ok) = getChainlinkSqrtPriceX96(key);
-        if (!ok || cl == 0) revert OracleUnavailable();
-        uint256 price = Math.mulDiv(
-            uint256(cl),
-            uint256(cl),
-            uint256(1) << 192
+        (uint160 sqrtPriceX96, ) = getReferenceSqrtPriceX96(
+            key,
+            MIN_TWAP_WINDOW_SECONDS
         );
-        return Math.mulDiv(price, 1e18, 1);
+        if (sqrtPriceX96 == 0) revert OracleUnavailable();
+        return _price1e18FromSqrt(sqrtPriceX96);
+    }
+
+    /// @notice Returns the TWAP only when the pool-side observation history is still fresh.
+    function getTwapSqrtPriceX96IfFresh(
+        PoolKey calldata key,
+        uint32 windowSeconds
+    ) public view returns (uint160 sqrtPriceX96, bool ok) {
+        PoolId poolId = key.toId();
+        PoolOracleConfig memory cfg = poolOracle[poolId];
+        PoolState memory st = poolState[poolId];
+        if (st.lastUpdated == 0) return (0, false);
+        if (
+            block.timestamp >
+            uint256(st.lastUpdated) + uint256(cfg.maxPoolStaleSeconds)
+        ) return (0, false);
+
+        sqrtPriceX96 = getTwapSqrtPriceX96(key, windowSeconds);
+        ok = sqrtPriceX96 != 0;
+    }
+
+    /// @notice Returns the preferred reference source for a pool.
+    /// @return sqrtPriceX96 Preferred reference price in Uniswap sqrt-price notation.
+    /// @return usingChainlink True when the returned sqrt price came from the external feed.
+    function getReferenceSqrtPriceX96(
+        PoolKey calldata key,
+        uint32 twapWindowSeconds
+    ) public view returns (uint160 sqrtPriceX96, bool usingChainlink) {
+        (uint160 cl, bool ok) = getChainlinkSqrtPriceX96(key);
+        if (ok && cl != 0) return (cl, true);
+
+        (uint160 twap, bool twapOk) = getTwapSqrtPriceX96IfFresh(
+            key,
+            twapWindowSeconds
+        );
+        if (!twapOk) return (0, false);
+        return (twap, false);
     }
 
     function _scaleTo1e18(
@@ -329,11 +376,10 @@ contract OracleAdapter is Ownable2Step {
     }
 
     function _price1e18FromSqrt(uint160 sqrtPriceX96) internal pure returns (uint256) {
-        uint256 price = Math.mulDiv(
-            uint256(sqrtPriceX96),
-            uint256(sqrtPriceX96),
-            uint256(1) << 192
-        );
-        return Math.mulDiv(price, 1e18, 1);
+        uint256 a = uint256(sqrtPriceX96);
+        uint256 denom = uint256(1) << 192;
+        uint256 q = FullMath.mulDiv(a, a, denom);
+        uint256 r = mulmod(a, a, denom);
+        return (q * 1e18) + Math.mulDiv(r, 1e18, denom);
     }
 }

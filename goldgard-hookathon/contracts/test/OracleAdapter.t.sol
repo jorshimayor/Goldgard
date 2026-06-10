@@ -68,6 +68,7 @@ contract OracleAdapterTest is Test {
         OracleAdapter.PoolOracleConfig memory oCfg = OracleAdapter.PoolOracleConfig({
             aggregator: IChainlinkAggregatorV3(address(agg)),
             maxStaleSeconds: 3600,
+            maxPoolStaleSeconds: 3600,
             aggregatorDecimals: 8,
             token0Decimals: 18,
             token1Decimals: 18
@@ -123,6 +124,7 @@ contract OracleAdapterTest is Test {
         OracleAdapter.PoolOracleConfig memory badCfg = OracleAdapter.PoolOracleConfig({
             aggregator: IChainlinkAggregatorV3(address(agg)),
             maxStaleSeconds: 3600,
+            maxPoolStaleSeconds: 3600,
             aggregatorDecimals: 8,
             token0Decimals: 31,
             token1Decimals: 18
@@ -135,6 +137,7 @@ contract OracleAdapterTest is Test {
         OracleAdapter.PoolOracleConfig memory cfg = OracleAdapter.PoolOracleConfig({
             aggregator: IChainlinkAggregatorV3(address(agg)),
             maxStaleSeconds: 3600,
+            maxPoolStaleSeconds: 3600,
             aggregatorDecimals: 20,
             token0Decimals: 6,
             token1Decimals: 24
@@ -150,6 +153,7 @@ contract OracleAdapterTest is Test {
         OracleAdapter.PoolOracleConfig memory cfg = OracleAdapter.PoolOracleConfig({
             aggregator: IChainlinkAggregatorV3(address(0)),
             maxStaleSeconds: 3600,
+            maxPoolStaleSeconds: 3600,
             aggregatorDecimals: 8,
             token0Decimals: 18,
             token1Decimals: 18
@@ -261,6 +265,7 @@ contract OracleAdapterTest is Test {
         OracleAdapter.PoolOracleConfig memory cfg = OracleAdapter.PoolOracleConfig({
             aggregator: IChainlinkAggregatorV3(address(0)),
             maxStaleSeconds: 3600,
+            maxPoolStaleSeconds: 3600,
             aggregatorDecimals: 8,
             token0Decimals: 18,
             token1Decimals: 18
@@ -289,6 +294,7 @@ contract OracleAdapterTest is Test {
         OracleAdapter.PoolOracleConfig memory cfg = OracleAdapter.PoolOracleConfig({
             aggregator: IChainlinkAggregatorV3(address(agg18)),
             maxStaleSeconds: 3600,
+            maxPoolStaleSeconds: 3600,
             aggregatorDecimals: 18,
             token0Decimals: 24,
             token1Decimals: 6
@@ -303,6 +309,7 @@ contract OracleAdapterTest is Test {
         OracleAdapter.PoolOracleConfig memory cfg = OracleAdapter.PoolOracleConfig({
             aggregator: IChainlinkAggregatorV3(address(agg)),
             maxStaleSeconds: 3600,
+            maxPoolStaleSeconds: 3600,
             aggregatorDecimals: 6,
             token0Decimals: 18,
             token1Decimals: 18
@@ -317,6 +324,44 @@ contract OracleAdapterTest is Test {
         uint256 p = oracle.getPrice1e18(key, 600);
         uint256 strict = oracle.getPrice1e18Strict(key);
         require(p == strict);
+    }
+
+    function testGetPriceStrictFallsBackToFreshTwapWhenChainlinkStale() public {
+        oracle.updateFromPool(IPoolManager(address(manager)), key);
+        vm.warp(block.timestamp + 11 minutes);
+        oracle.updateFromPool(IPoolManager(address(manager)), key);
+
+        vm.warp(block.timestamp + 3500);
+        vm.store(
+            address(agg),
+            bytes32(uint256(1)),
+            bytes32(uint256(block.timestamp - 4000))
+        );
+
+        uint256 p = oracle.getPrice1e18Strict(key);
+        require(p != 0);
+    }
+
+    function testGetReferenceSqrtPricePrefersFreshChainlink() public {
+        oracle.updateFromPool(IPoolManager(address(manager)), key);
+        vm.warp(block.timestamp + 11 minutes);
+        oracle.updateFromPool(IPoolManager(address(manager)), key);
+
+        (uint160 sqrtPriceX96, bool usingChainlink) = oracle.getReferenceSqrtPriceX96(
+            key,
+            600
+        );
+        require(sqrtPriceX96 != 0);
+        assertTrue(usingChainlink);
+    }
+
+    function testGetTwapIfFreshReturnsFalseWhenPoolStateStale() public {
+        oracle.updateFromPool(IPoolManager(address(manager)), key);
+        vm.warp(block.timestamp + 4000);
+
+        (uint160 sqrtPriceX96, bool ok) = oracle.getTwapSqrtPriceX96IfFresh(key, 600);
+        assertEq(sqrtPriceX96, 0);
+        assertFalse(ok);
     }
 
     function testTwapSearchHandlesIndexWrapToZero() public {

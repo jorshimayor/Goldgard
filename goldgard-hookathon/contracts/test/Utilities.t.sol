@@ -40,6 +40,37 @@ contract TransientHarness {
 
 contract UtilitiesTest is Test {
     event CallbackRequested(address indexed target, bytes data);
+    uint256 internal constant ORACLE_TOPIC_0 =
+        uint256(keccak256("OraclePriceUpdated(uint256,uint256,uint256,uint256)"));
+    uint256 internal constant PREMIUM_TOPIC_0 =
+        uint256(keccak256("PremiumDiverted(bytes32,address,address,uint256,uint256,uint16)"));
+    uint256 internal constant CLAIM_PAID_TOPIC_0 =
+        uint256(keccak256("ClaimPaid(address,uint256,uint256)"));
+    uint256 internal constant RESERVE_BALANCE_TOPIC_0 =
+        uint256(keccak256("ReserveBalanceChanged(uint256,int256,address)"));
+
+    function _watcher(address receiver) internal returns (GoldgardReactiveWatcher) {
+        return
+            new GoldgardReactiveWatcher(
+                address(this),
+                receiver,
+                11155111,
+                11155111,
+                300000,
+                address(0x1001),
+                address(0x1002),
+                address(0x1003),
+                address(0x1004),
+                ORACLE_TOPIC_0,
+                PREMIUM_TOPIC_0,
+                CLAIM_PAID_TOPIC_0,
+                RESERVE_BALANCE_TOPIC_0,
+                true,
+                true,
+                true,
+                true
+            );
+    }
     function testBaseHookDefaultMethodsRevert() public {
         PoolManager manager = new PoolManager(address(this));
         NoopHook h = new NoopHook(IPoolManager(address(manager)));
@@ -125,23 +156,41 @@ contract UtilitiesTest is Test {
 
     function testReactiveWatcherTriggersCallbackRequest() public {
         address receiver = address(0xCA11);
-        GoldgardReactiveWatcher w = new GoldgardReactiveWatcher(receiver);
+        GoldgardReactiveWatcher w = _watcher(receiver);
 
         vm.expectEmit(true, false, false, true);
         emit CallbackRequested(
             receiver,
-            abi.encodeWithSignature("handleAlertLevel(uint8)", uint8(2))
+            abi.encodeWithSignature("handleAlertLevel(address,uint8)", address(0), uint8(2))
         );
         w.onOraclePriceUpdated(0, 0, 300, 100);
     }
 
     function testReactiveWatcherConstructorRejectsZeroReceiver() public {
         vm.expectRevert(GoldgardReactiveWatcher.BadConfig.selector);
-        new GoldgardReactiveWatcher(address(0));
+        new GoldgardReactiveWatcher(
+            address(this),
+            address(0),
+            11155111,
+            11155111,
+            300000,
+            address(0x1001),
+            address(0x1002),
+            address(0x1003),
+            address(0x1004),
+            ORACLE_TOPIC_0,
+            PREMIUM_TOPIC_0,
+            CLAIM_PAID_TOPIC_0,
+            RESERVE_BALANCE_TOPIC_0,
+            true,
+            true,
+            true,
+            true
+        );
     }
 
     function testReactiveWatcherSetterHappyPaths() public {
-        GoldgardReactiveWatcher w = new GoldgardReactiveWatcher(address(0xCA11));
+        GoldgardReactiveWatcher w = _watcher(address(0xCA11));
         w.setThresholds(123, 456);
         w.setAlertLevels(3, 0);
         w.setReservePolicy(100, 200);
@@ -156,13 +205,13 @@ contract UtilitiesTest is Test {
     }
 
     function testReactiveWatcherNoTriggerWhenBelowThresholds() public {
-        GoldgardReactiveWatcher w = new GoldgardReactiveWatcher(address(0xCA11));
+        GoldgardReactiveWatcher w = _watcher(address(0xCA11));
         w.onOraclePriceUpdated(0, 0, 199, 100);
         require(w.lastDeviationBps() == 199);
     }
 
     function testReactiveWatcherSlopeIgnoredOnDecreaseOrNoTimeElapsed() public {
-        GoldgardReactiveWatcher w = new GoldgardReactiveWatcher(address(0xCA11));
+        GoldgardReactiveWatcher w = _watcher(address(0xCA11));
         w.onOraclePriceUpdated(0, 0, 250, 100);
         w.onOraclePriceUpdated(0, 0, 240, 110);
         require(w.lastSlopeBpsPerSecond() == 0);
@@ -172,13 +221,13 @@ contract UtilitiesTest is Test {
     }
 
     function testReactiveWatcherTrendTriggerUsesSlope() public {
-        GoldgardReactiveWatcher w = new GoldgardReactiveWatcher(address(0xCA11));
+        GoldgardReactiveWatcher w = _watcher(address(0xCA11));
 
         w.onOraclePriceUpdated(0, 0, 100, 100);
         vm.expectEmit(true, false, false, true);
         emit CallbackRequested(
             address(0xCA11),
-            abi.encodeWithSignature("handleAlertLevel(uint8)", uint8(1))
+            abi.encodeWithSignature("handleAlertLevel(address,uint8)", address(0), uint8(1))
         );
         w.onOraclePriceUpdated(0, 0, 250, 110);
 
@@ -187,65 +236,76 @@ contract UtilitiesTest is Test {
 
     function testReactiveWatcherReserveLowTriggersThresholdTightening() public {
         address receiver = address(0xCA11);
-        GoldgardReactiveWatcher w = new GoldgardReactiveWatcher(receiver);
+        GoldgardReactiveWatcher w = _watcher(receiver);
         w.setReservePolicy(100, 777);
 
         vm.expectEmit(true, false, false, true);
         emit CallbackRequested(
             receiver,
-            abi.encodeWithSignature("handleTightenThreshold(uint256)", uint256(777))
+            abi.encodeWithSignature(
+                "handleTightenThreshold(address,uint256)",
+                address(0),
+                uint256(777)
+            )
         );
         w.onReserveBalanceChanged(99, -1, address(this));
     }
 
     function testReactiveWatcherClaimPaidTriggersPremiumRateChange() public {
         address receiver = address(0xCA11);
-        GoldgardReactiveWatcher w = new GoldgardReactiveWatcher(receiver);
+        GoldgardReactiveWatcher w = _watcher(receiver);
         w.setPremiumPolicy(3);
 
         vm.expectEmit(true, false, false, true);
         emit CallbackRequested(
             receiver,
-            abi.encodeWithSignature("handleAdjustPremiumRate(uint256)", uint256(3))
+            abi.encodeWithSignature(
+                "handleAdjustPremiumRate(address,uint256)",
+                address(0),
+                uint256(3)
+            )
         );
         w.onClaimPaid(address(this), 1, 0);
     }
 
     function testReactiveWatcherCronTriggersEpochCheckpoint() public {
         address receiver = address(0xCA11);
-        GoldgardReactiveWatcher w = new GoldgardReactiveWatcher(receiver);
+        GoldgardReactiveWatcher w = _watcher(receiver);
 
         vm.expectEmit(true, false, false, true);
-        emit CallbackRequested(receiver, abi.encodeWithSignature("handleEpochCheckpoint()"));
+        emit CallbackRequested(
+            receiver,
+            abi.encodeWithSignature("handleEpochCheckpoint(address)", address(0))
+        );
         w.onCron();
     }
 
     function testReactiveWatcherThresholdBounds() public {
-        GoldgardReactiveWatcher w = new GoldgardReactiveWatcher(address(0xCA11));
+        GoldgardReactiveWatcher w = _watcher(address(0xCA11));
         vm.expectRevert(GoldgardReactiveWatcher.BadConfig.selector);
         w.setThresholds(10_001, 0);
     }
 
     function testReactiveWatcherSlopeWarnBounds() public {
-        GoldgardReactiveWatcher w = new GoldgardReactiveWatcher(address(0xCA11));
+        GoldgardReactiveWatcher w = _watcher(address(0xCA11));
         vm.expectRevert(GoldgardReactiveWatcher.BadConfig.selector);
         w.setThresholds(0, 10_001);
     }
 
     function testReactiveWatcherAlertLevelBounds() public {
-        GoldgardReactiveWatcher w = new GoldgardReactiveWatcher(address(0xCA11));
+        GoldgardReactiveWatcher w = _watcher(address(0xCA11));
         vm.expectRevert(GoldgardReactiveWatcher.BadConfig.selector);
         w.setAlertLevels(4, 0);
     }
 
     function testReactiveWatcherAlertLevelTrendBounds() public {
-        GoldgardReactiveWatcher w = new GoldgardReactiveWatcher(address(0xCA11));
+        GoldgardReactiveWatcher w = _watcher(address(0xCA11));
         vm.expectRevert(GoldgardReactiveWatcher.BadConfig.selector);
         w.setAlertLevels(0, 4);
     }
 
     function testReactiveWatcherPremiumPolicyBoundsAndNoopPaths() public {
-        GoldgardReactiveWatcher w = new GoldgardReactiveWatcher(address(0xCA11));
+        GoldgardReactiveWatcher w = _watcher(address(0xCA11));
         vm.expectRevert(GoldgardReactiveWatcher.BadConfig.selector);
         w.setPremiumPolicy(101);
 
@@ -255,7 +315,7 @@ contract UtilitiesTest is Test {
     }
 
     function testReactiveWatcherReservePolicyNoopPaths() public {
-        GoldgardReactiveWatcher w = new GoldgardReactiveWatcher(address(0xCA11));
+        GoldgardReactiveWatcher w = _watcher(address(0xCA11));
         w.onReserveBalanceChanged(0, 0, address(this));
         w.setReservePolicy(100, 0);
         w.onReserveBalanceChanged(99, 0, address(this));

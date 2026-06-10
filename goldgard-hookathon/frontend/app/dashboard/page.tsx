@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { BarChart3, Coins, Network, ShieldCheck, Zap } from "lucide-react";
+import { useSearchParams } from "next/navigation";
+import { BarChart3, Coins, FileText, Network, Play, ShieldCheck, Zap } from "lucide-react";
 import { Display, Subhead, Body, Data, RuneStone, Beacon, ForgedLines } from "@/components/DesignComponents";
 import {
   Area,
@@ -21,9 +22,39 @@ import { goldgardHookAbi } from "../../lib/abi/goldgardHook";
 import { safetyModuleAbi } from "../../lib/abi/safetyModule";
 import { rewardDistributorAbi } from "../../lib/abi/rewardDistributor";
 import { erc20Abi } from "../../lib/abi/erc20";
-import { chainLabel, rpcWsUrl } from "../../lib/networks";
+import { chainLabel, rpcWsUrl, supportedChains } from "../../lib/networks";
+import { useEventStream } from "../../lib/eventStream";
 
 type SeriesPoint = { t: number; value: number };
+type InsuranceSimulationReport = {
+  metrics?: {
+    premiumCollectedUnits?: number;
+    paidPayoutUnits?: number;
+    lossCoverageRatio?: number;
+    reactiveActivationSuccessRate?: number;
+  };
+  claims?: {
+    generatedLossEvents?: number;
+    paid?: number;
+    pending?: number;
+  };
+  validation?: {
+    pass?: boolean;
+  };
+  eventsLogged?: number;
+};
+
+function toPositiveInt(value: string, fallback: number) {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n <= 0) return fallback;
+  return Math.floor(n);
+}
+
+function toPositiveNumber(value: string, fallback: number) {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n <= 0) return fallback;
+  return n;
+}
 
 function formatDecimalString(value: string, maxFractionDigits: number) {
   const [rawInt, rawFrac = ""] = value.split(".");
@@ -69,8 +100,14 @@ function SeriesTooltip({
 
 export default function DashboardPage() {
   const walletChainId = useChainId();
-  const viewChainId = 11155111;
-  const cfg = useMemo(() => getDemoConfigForChain(viewChainId), []);
+  const searchParams = useSearchParams();
+  const viewChainId = useMemo(() => {
+    const raw = searchParams.get("chainId");
+    const requested = raw ? Number(raw) : 11155111;
+    if (Number.isFinite(requested) && supportedChains.some((c) => c.id === requested)) return requested;
+    return 11155111;
+  }, [searchParams]);
+  const cfg = useMemo(() => getDemoConfigForChain(viewChainId), [viewChainId]);
   const { address, isConnected } = useAccount();
   const { switchChain } = useSwitchChain();
 
@@ -222,11 +259,54 @@ export default function DashboardPage() {
     query: { enabled: Boolean(address && isConfiguredAddress(cfg.token1)), refetchInterval: 5_000 },
   });
 
-  const alertLevel = reactiveAlert?.[0] ?? 0;
-  const alertUntil = reactiveAlert?.[1] ?? 0n;
+  const eventStream = useEventStream(viewChainId, { enabled: true, keepLast: 25, pollMs: 1500 });
+  const [eventAlertLevel, setEventAlertLevel] = useState<number | null>(null);
+  const [eventAlertUntil, setEventAlertUntil] = useState<bigint | null>(null);
+
+  useEffect(() => {
+    const top = eventStream.logs[0];
+    if (!top) return;
+    if (top.eventName !== "AlertLevelRaised") return;
+    const args = top.args as unknown;
+
+    const levelRaw =
+      args && typeof args === "object" && "level" in args
+        ? (args as { level?: unknown }).level
+        : Array.isArray(args)
+          ? args[0]
+          : undefined;
+
+    const untilRaw =
+      args && typeof args === "object" && "until" in args
+        ? (args as { until?: unknown }).until
+        : Array.isArray(args)
+          ? args[1]
+          : undefined;
+
+    const level = Number(levelRaw);
+    try {
+      const until = BigInt(String(untilRaw ?? "0"));
+      if (Number.isFinite(level) && level >= 0 && level <= 255) {
+        setEventAlertLevel(level);
+        setEventAlertUntil(until);
+      }
+    } catch {
+    }
+  }, [eventStream.logs]);
+
+  const alertLevel = eventAlertLevel ?? (reactiveAlert?.[0] ?? 0);
+  const alertUntil = eventAlertUntil ?? (reactiveAlert?.[1] ?? 0n);
   const alertActive = alertLevel > 0 && BigInt(Math.floor(Date.now() / 1000)) < alertUntil;
 
   const [series, setSeries] = useState<SeriesPoint[]>([]);
+  const [insurancePeriods, setInsurancePeriods] = useState("12");
+  const [insurancePolicyCount, setInsurancePolicyCount] = useState("120");
+  const [insuranceLambda, setInsuranceLambda] = useState("3.2");
+  const [insurancePremiumBps, setInsurancePremiumBps] = useState("2");
+  const [insuranceBusy, setInsuranceBusy] = useState(false);
+  const [insuranceError, setInsuranceError] = useState<string | null>(null);
+  const [insuranceReport, setInsuranceReport] = useState<InsuranceSimulationReport | null>(null);
+  const [insuranceMarkdown, setInsuranceMarkdown] = useState<string>("");
   useEffect(() => {
     if (safetyAssets === undefined) return;
     if (safetyAssetDecimals === undefined) return;
@@ -284,6 +364,45 @@ export default function DashboardPage() {
       healthTimer.current = null;
     };
   }, [viewChainId]);
+
+  async function runInsuranceScenario() {
+    setInsuranceBusy(true);
+    setInsuranceError(null);
+    try {
+      const res = await fetch("/api/insurance-simulate", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          config: {
+            periods: toPositiveInt(insurancePeriods, 12),
+            portfolio: {
+              policyCount: toPositiveInt(insurancePolicyCount, 120),
+            },
+            frequency: {
+              distribution: "poisson",
+              lambda: toPositiveNumber(insuranceLambda, 3.2),
+            },
+            premiumRules: {
+              basePremiumBps: toPositiveInt(insurancePremiumBps, 2),
+            },
+          },
+        }),
+      });
+      const json = (await res.json()) as {
+        ok: boolean;
+        error?: string;
+        report?: InsuranceSimulationReport;
+        markdown?: string;
+      };
+      if (!res.ok || !json.ok) throw new Error(json.error ?? "Insurance simulation failed.");
+      setInsuranceReport(json.report ?? null);
+      setInsuranceMarkdown(json.markdown ?? "");
+    } catch (e) {
+      setInsuranceError((e as Error).message);
+    } finally {
+      setInsuranceBusy(false);
+    }
+  }
 
   useEffect(() => {
     const bn = wsBlockNumber ?? blockNumber;
@@ -403,6 +522,11 @@ export default function DashboardPage() {
                 label={wsHealthy ? "WS ok" : "WS off"}
               />
             ) : null}
+            <Beacon
+              data-testid="events-status"
+              status={eventStream.healthy ? "active" : eventStream.error ? "warning" : "neutral"}
+              label={eventStream.healthy ? "Events ok" : eventStream.error ? "Events degraded" : "Events off"}
+            />
             {walletMismatch ? <Beacon data-testid="wallet-mismatch" status="warning" label="Wallet mismatch" /> : null}
             {rpcError ? (
               <Data className="text-xs text-ember-red">{rpcError}</Data>
@@ -616,6 +740,138 @@ export default function DashboardPage() {
                   </div>
                 </div>
               </div>
+            </RuneStone>
+
+            <RuneStone>
+              <div className="flex items-center justify-between mb-4">
+                <Subhead className="text-lg">Insurance Simulator</Subhead>
+                <Beacon
+                  status={insuranceBusy ? "warning" : insuranceReport ? "active" : "neutral"}
+                  label={insuranceBusy ? "Running" : insuranceReport ? "Report ready" : "Idle"}
+                />
+              </div>
+
+              <Body className="text-gg-muted text-sm">
+                Run stochastic insurance scenarios from the dashboard and return report-ready coverage, premium, and reactive-trigger metrics.
+              </Body>
+
+              <div className="mt-6 grid gap-3 sm:grid-cols-2">
+                <label className="space-y-2">
+                  <Data className="text-gg-muted block text-xs">Periods</Data>
+                  <input
+                    value={insurancePeriods}
+                    onChange={(e) => setInsurancePeriods(e.target.value)}
+                    inputMode="numeric"
+                    className="h-11 w-full rounded-xl border border-gg-border/50 bg-gg-surface/30 px-4 text-sm text-foreground focus:border-aged-gold focus:outline-none"
+                  />
+                </label>
+                <label className="space-y-2">
+                  <Data className="text-gg-muted block text-xs">Policies</Data>
+                  <input
+                    value={insurancePolicyCount}
+                    onChange={(e) => setInsurancePolicyCount(e.target.value)}
+                    inputMode="numeric"
+                    className="h-11 w-full rounded-xl border border-gg-border/50 bg-gg-surface/30 px-4 text-sm text-foreground focus:border-aged-gold focus:outline-none"
+                  />
+                </label>
+                <label className="space-y-2">
+                  <Data className="text-gg-muted block text-xs">Frequency Lambda</Data>
+                  <input
+                    value={insuranceLambda}
+                    onChange={(e) => setInsuranceLambda(e.target.value)}
+                    inputMode="decimal"
+                    className="h-11 w-full rounded-xl border border-gg-border/50 bg-gg-surface/30 px-4 text-sm text-foreground focus:border-aged-gold focus:outline-none"
+                  />
+                </label>
+                <label className="space-y-2">
+                  <Data className="text-gg-muted block text-xs">Base Premium Bps</Data>
+                  <input
+                    value={insurancePremiumBps}
+                    onChange={(e) => setInsurancePremiumBps(e.target.value)}
+                    inputMode="numeric"
+                    className="h-11 w-full rounded-xl border border-gg-border/50 bg-gg-surface/30 px-4 text-sm text-foreground focus:border-aged-gold focus:outline-none"
+                  />
+                </label>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => void runInsuranceScenario()}
+                disabled={insuranceBusy}
+                className="mt-5 inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl border border-gg-border/50 bg-gg-surface/30 px-4 text-sm font-semibold text-foreground transition-colors hover:border-aged-gold/50 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <Play className="h-4 w-4 text-aged-gold" />
+                {insuranceBusy ? "Running Scenario..." : "Run Insurance Scenario"}
+              </button>
+
+              {insuranceError ? (
+                <div className="mt-4 rounded-xl border border-gg-border/50 bg-ember-red/10 p-4 text-sm text-ember-red">
+                  <p className="font-semibold mb-1">Simulation Error</p>
+                  {insuranceError}
+                </div>
+              ) : null}
+
+              {insuranceReport ? (
+                <div className="mt-5 space-y-4">
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="rounded-xl border border-gg-border/50 bg-gg-surface/30 p-4">
+                      <Data className="text-gg-muted block text-xs mb-1">Premium Collected</Data>
+                      <div className="text-lg font-bold text-aged-gold tabular-nums">
+                        {formatNumber(insuranceReport.metrics?.premiumCollectedUnits ?? 0, { maximumFractionDigits: 2 })}
+                      </div>
+                    </div>
+                    <div className="rounded-xl border border-gg-border/50 bg-gg-surface/30 p-4">
+                      <Data className="text-gg-muted block text-xs mb-1">Paid Payout</Data>
+                      <div className="text-lg font-bold text-aged-gold tabular-nums">
+                        {formatNumber(insuranceReport.metrics?.paidPayoutUnits ?? 0, { maximumFractionDigits: 2 })}
+                      </div>
+                    </div>
+                    <div className="rounded-xl border border-gg-border/50 bg-gg-surface/30 p-4">
+                      <Data className="text-gg-muted block text-xs mb-1">Loss Coverage Ratio</Data>
+                      <div className="text-lg font-bold text-aged-gold tabular-nums">
+                        {formatNumber((insuranceReport.metrics?.lossCoverageRatio ?? 0) * 100, {
+                          maximumFractionDigits: 2,
+                        })}
+                        %
+                      </div>
+                    </div>
+                    <div className="rounded-xl border border-gg-border/50 bg-gg-surface/30 p-4">
+                      <Data className="text-gg-muted block text-xs mb-1">Reactive Success</Data>
+                      <div className="text-lg font-bold text-aged-gold tabular-nums">
+                        {formatNumber((insuranceReport.metrics?.reactiveActivationSuccessRate ?? 0) * 100, {
+                          maximumFractionDigits: 2,
+                        })}
+                        %
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="rounded-xl border border-gg-border/50 bg-gg-surface/30 p-4">
+                    <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
+                      <FileText className="h-4 w-4 text-aged-gold" />
+                      Report Summary
+                    </div>
+                    <div className="mt-3 space-y-2 text-sm text-gg-muted">
+                      <div>Loss events: {insuranceReport.claims?.generatedLossEvents ?? 0}</div>
+                      <div>Claims paid: {insuranceReport.claims?.paid ?? 0}</div>
+                      <div>Pending claims: {insuranceReport.claims?.pending ?? 0}</div>
+                      <div>Validation: {insuranceReport.validation?.pass ? "pass" : "fail"}</div>
+                      <div>Events logged: {insuranceReport.eventsLogged ?? 0}</div>
+                    </div>
+                  </div>
+
+                  {insuranceMarkdown ? (
+                    <details className="rounded-xl border border-gg-border/50 bg-gg-surface/30 p-4">
+                      <summary className="cursor-pointer text-sm font-semibold text-foreground">
+                        Report-ready Markdown
+                      </summary>
+                      <pre className="mt-3 overflow-x-auto whitespace-pre-wrap text-xs text-gg-muted">
+                        {insuranceMarkdown}
+                      </pre>
+                    </details>
+                  ) : null}
+                </div>
+              ) : null}
             </RuneStone>
           </aside>
         </div>

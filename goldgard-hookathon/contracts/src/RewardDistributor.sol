@@ -7,6 +7,9 @@ import {
     Ownable2Step
 } from "openzeppelin-contracts/contracts/access/Ownable2Step.sol";
 
+/// @title Goldgard Reward Distributor
+/// @notice Minimal ERC-6909 reward minter used by the hook to issue protocol
+///         reward units without giving arbitrary accounts mint access.
 contract RewardDistributor is ERC6909, Ownable2Step {
     error OnlyHook();
 
@@ -16,10 +19,12 @@ contract RewardDistributor is ERC6909, Ownable2Step {
 
     constructor(address _owner) Ownable(_owner) {}
 
+    /// @notice Sets the only address allowed to mint reward units.
     function setHook(address _hook) external onlyOwner {
         hook = _hook;
     }
 
+    /// @notice Mints GGARD reward units to a recipient after hook activity.
     function mintReward(address to, uint256 amount) external {
         if (msg.sender != hook) revert OnlyHook();
         _mint(to, GGARD_ID, amount);

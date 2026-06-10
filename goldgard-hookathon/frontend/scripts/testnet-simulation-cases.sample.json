@@ -1,0 +1,22 @@
+{
+  "cases": [
+    {
+      "label": "sepolia_price_up_10pct_5steps",
+      "chainId": 11155111,
+      "moveBps": 1000,
+      "steps": 5,
+      "amountPerStep": "10000000000000000000000",
+      "directionUp": true,
+      "description": "Default upward price swing replay on Sepolia."
+    },
+    {
+      "label": "sepolia_price_down_10pct_5steps",
+      "chainId": 11155111,
+      "moveBps": 1000,
+      "steps": 5,
+      "amountPerStep": "10000000000000000000000",
+      "directionUp": false,
+      "description": "Mirror downward price swing replay on Sepolia."
+    }
+  ]
+}

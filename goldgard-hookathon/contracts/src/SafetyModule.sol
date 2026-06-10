@@ -16,6 +16,7 @@ import {
 
 import {PoolId} from "v4-core/types/PoolId.sol";
 
+/// @notice Read-only claim surface implemented by the hook.
 interface IGoldgardClaimsView {
     function isEligible(
         address account,
@@ -27,6 +28,9 @@ interface IGoldgardClaimsView {
     ) external view returns (uint256 payoutAssets);
 }
 
+/// @title Goldgard Safety Module
+/// @notice ERC-4626 reserve that accumulates swap-funded insurance premiums and
+///         pays LP claims after cooldown and eligibility checks succeed.
 contract SafetyModule is ERC4626, Ownable2Step {
     using SafeERC20 for IERC20;
 
@@ -112,10 +116,12 @@ contract SafetyModule is ERC4626, Ownable2Step {
         _;
     }
 
+    /// @notice Sets the hook allowed to deposit premiums into the reserve.
     function setHook(address _hook) external onlyOwner {
         hook = _hook;
     }
 
+    /// @notice Sets the Sepolia Reactive callback proxy used for authorized control paths.
     function setReactiveCallbackProxy(address proxy) external onlyOwner {
         if (proxy == address(0)) revert BadConfig();
         if (reactiveCallbackProxy != address(0)) revert BadConfig();
@@ -123,35 +129,41 @@ contract SafetyModule is ERC4626, Ownable2Step {
         emit ReactiveCallbackProxySet(proxy);
     }
 
+    /// @notice Sets the address allowed to trigger admin-like actions such as epoch checkpoints.
     function setAuthorizedCaller(address caller) external onlyOwner {
         if (caller == address(0)) revert BadConfig();
         authorizedCaller = caller;
         emit AuthorizedCallerSet(caller);
     }
 
+    /// @notice Sets the initial claim view used to evaluate LP eligibility and payout amounts.
     function setClaimsView(IGoldgardClaimsView _claimsView) external onlyOwner {
         if (address(claimsView) != address(0)) revert ClaimsViewAlreadySet();
         claimsView = _claimsView;
         emit ClaimsViewChanged(address(_claimsView));
     }
 
+    /// @notice Pauses or unpauses claim execution without affecting deposits.
     function setClaimsPaused(bool paused) external onlyOwner {
         claimsPaused = paused;
         emit ClaimsPausedSet(paused);
     }
 
+    /// @notice Updates the waiting period between claim request and claim execution.
     function setCooldownSeconds(uint64 newCooldownSeconds) external onlyOwner {
         if (newCooldownSeconds > MAX_COOLDOWN_SECONDS) revert BadConfig();
         cooldownSeconds = newCooldownSeconds;
         emit CooldownSecondsSet(newCooldownSeconds);
     }
 
+    /// @notice Sets the timelock required before a new claims view can be activated.
     function setClaimsViewChangeDelay(uint64 delaySeconds) external onlyOwner {
         if (delaySeconds > 30 days) revert BadConfig();
         claimsViewChangeDelay = delaySeconds;
         emit ClaimsViewDelaySet(delaySeconds);
     }
 
+    /// @notice Schedules a new claims view behind a timelock.
     function scheduleClaimsViewChange(
         IGoldgardClaimsView _claimsView
     ) external onlyOwner {
@@ -164,11 +176,13 @@ contract SafetyModule is ERC4626, Ownable2Step {
         );
     }
 
+    /// @notice Cancels a previously scheduled claims view migration.
     function cancelClaimsViewChange() external onlyOwner {
         pendingClaimsView = IGoldgardClaimsView(address(0));
         pendingClaimsViewValidAt = 0;
     }
 
+    /// @notice Finalizes a scheduled claims view migration once the delay has elapsed.
     function acceptClaimsViewChange() external {
         if (address(pendingClaimsView) == address(0)) revert NoPendingClaimsView();
         if (block.timestamp < pendingClaimsViewValidAt) revert ClaimsViewNotReady();
@@ -178,6 +192,7 @@ contract SafetyModule is ERC4626, Ownable2Step {
         emit ClaimsViewChanged(address(claimsView));
     }
 
+    /// @notice Deposits hook-collected premiums into the ERC-4626 reserve.
     function depositPremium(
         uint256 amount
     ) external returns (uint256 sharesMinted) {
@@ -186,11 +201,14 @@ contract SafetyModule is ERC4626, Ownable2Step {
         epochPremiumIn += amount;
     }
 
+    /// @notice Starts the claim cooldown for a specific LP and pool.
     function requestClaim(PoolId poolId) external {
         if (claimRequestedAt[msg.sender][poolId] != 0) revert ClaimPending();
         claimRequestedAt[msg.sender][poolId] = uint64(block.timestamp);
     }
 
+    /// @notice Pays an LP claim once cooldown and eligibility checks pass.
+    /// @dev Payouts are capped by the reserve's available assets.
     function executeClaim(
         PoolId poolId
     ) external returns (uint256 payoutAssets) {
@@ -218,6 +236,7 @@ contract SafetyModule is ERC4626, Ownable2Step {
         emit ClaimPaidForPool(msg.sender, poolId, payoutAssets, reservePostBalance);
     }
 
+    /// @notice Closes the current accounting epoch and emits reserve inflow/outflow totals.
     function epochCheckpoint() external onlyAuthorized {
         uint64 end = uint64(block.timestamp);
         emit EpochCheckpointed(

@@ -1,0 +1,67 @@
+{
+  "seed": 20260610,
+  "periods": 18,
+  "secondsPerPeriod": 86400,
+  "portfolio": {
+    "policyCount": 150,
+    "principalPerPolicy": 120000,
+    "exposurePerPolicy": 320000,
+    "initialReserve": 300000,
+    "coverageCapBps": 7000,
+    "eligibilityThresholdPct": 80,
+    "inRange": {
+      "distribution": "beta",
+      "alpha": 8,
+      "beta": 3
+    }
+  },
+  "frequency": {
+    "distribution": "poisson",
+    "lambda": 4.1
+  },
+  "severity": {
+    "distribution": "lognormal",
+    "medianBps": 1400,
+    "sigma": 0.6,
+    "minBps": 80,
+    "maxBps": 8500,
+    "directionWeights": {
+      "up": 0.45,
+      "down": 0.55
+    }
+  },
+  "claims": {
+    "cooldownPeriods": 1,
+    "maxExecutionAttempts": 4
+  },
+  "premiumRules": {
+    "pricingModel": "exposure_bps",
+    "basePremiumBps": 2,
+    "minimumPremiumPerPolicy": 22,
+    "expectedLossRatioBps": 4,
+    "actuarialLoadFactorBps": 11500,
+    "rounding": "floor"
+  },
+  "reactiveContract": {
+    "enabled": true,
+    "earlyWarnBps": 325,
+    "slopeWarnBps": 200,
+    "alertLevelHigh": 2,
+    "alertLevelTrend": 1,
+    "alertTtlPeriods": 2,
+    "reserveLowThreshold": 125000,
+    "tightenThresholdValue": 35000,
+    "premiumRateWhenImbalanced": 6,
+    "callbackSuccessProbability": 1,
+    "epochCheckpointEveryPeriods": 1
+  },
+  "logging": {
+    "maxEvents": 2500,
+    "echoEvents": false,
+    "includeEventData": true
+  },
+  "validation": {
+    "maxPremiumCalculationErrorBps": 0,
+    "minReactiveActivationSuccessRate": 0.95
+  }
+}

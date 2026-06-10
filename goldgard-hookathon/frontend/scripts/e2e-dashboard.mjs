@@ -1,4 +1,8 @@
 const baseUrl = process.env.BASE_URL ?? "http://127.0.0.1:3001";
+const chainId = Number(process.env.CHAIN_ID ?? "11155111");
+const expectedHex =
+  process.env.EXPECTED_CHAIN_HEX ??
+  (chainId === 11155111 ? "0xaa36a7" : chainId === 31337 ? "0x7a69" : "");
 
 function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
@@ -35,6 +39,41 @@ async function assertChainHealthy(chainId, expectedHex) {
   if (!b.ok) throw new Error(`chain ${chainId} blockNumber failed (${b.status}): ${JSON.stringify(b.json)}`);
   if (typeof b.json.result !== "string" || !b.json.result.startsWith("0x"))
     throw new Error(`chain ${chainId} bad blockNumber result: ${JSON.stringify(b.json)}`);
+}
+
+async function assertEventStreamHealthy(chainId) {
+  const res = await fetch(`${baseUrl}/api/events/${chainId}?pollMs=750&backfillBlocks=0`);
+  if (!res.ok || !res.body) {
+    throw new Error(`events stream failed (${res.status})`);
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = "";
+  let sawHello = false;
+  let sawPing = false;
+  const started = Date.now();
+
+  while (Date.now() - started < 8_000 && (!sawHello || !sawPing)) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    const chunks = buf.split("\n\n");
+    buf = chunks.pop() ?? "";
+    for (const chunk of chunks) {
+      if (chunk.includes("event: hello")) sawHello = true;
+      if (chunk.includes("event: ping")) sawPing = true;
+    }
+  }
+
+  try {
+    await reader.cancel();
+  } catch {
+  }
+
+  if (!sawHello || !sawPing) {
+    throw new Error(`events stream unhealthy for chain ${chainId}: hello=${sawHello} ping=${sawPing}`);
+  }
 }
 
 async function assertRpcFreshness(chainId) {
@@ -88,7 +127,7 @@ async function loadTestRpc(chainId, requests = 20, concurrency = 4) {
 }
 
 async function assertDashboardHasNoMockMarkers() {
-  const res = await fetch(`${baseUrl}/dashboard`, { method: "GET" });
+  const res = await fetch(`${baseUrl}/dashboard?chainId=${chainId}`, { method: "GET" });
   const html = await res.text();
   const forbidden = [
     "Position #418",
@@ -102,16 +141,34 @@ async function assertDashboardHasNoMockMarkers() {
   }
 }
 
+async function maybeRunSimulation(chainId) {
+  if (process.env.SIMULATE !== "true") return;
+  const res = await fetch(`${baseUrl}/api/simulate`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ chainId, directionUp: true, moveBps: 250, steps: 2 }),
+  });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok || !json.ok) {
+    throw new Error(`simulate failed (${res.status}): ${JSON.stringify(json)}`);
+  }
+}
+
 async function main() {
   console.log(`BASE_URL=${baseUrl}`);
+  console.log(`CHAIN_ID=${chainId}`);
 
-  await assertChainHealthy(11155111, "0xaa36a7");
-  await assertRpcFreshness(11155111);
+  if (!expectedHex) throw new Error(`Missing EXPECTED_CHAIN_HEX for chain ${chainId}`);
+  await assertChainHealthy(chainId, expectedHex);
+  await assertRpcFreshness(chainId);
+  await assertEventStreamHealthy(chainId);
 
   await assertDashboardHasNoMockMarkers();
+  await maybeRunSimulation(chainId);
+  await assertEventStreamHealthy(chainId);
 
-  const load = await loadTestRpc(11155111, 20, 4);
-  console.log(`RPC load(sepolia): ok=${load.ok} fail=${load.fail} p50=${load.p50}ms p95=${load.p95}ms total=${load.totalMs}ms`);
+  const load = await loadTestRpc(chainId, 20, 4);
+  console.log(`RPC load(${chainId}): ok=${load.ok} fail=${load.fail} p50=${load.p50}ms p95=${load.p95}ms total=${load.totalMs}ms`);
   if (load.fail > 2) throw new Error("RPC load test saw failures");
   console.log("OK");
 }

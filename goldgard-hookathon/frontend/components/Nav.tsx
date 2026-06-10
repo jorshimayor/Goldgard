@@ -9,8 +9,8 @@ import { Data } from "./DesignComponents";
 
 const links = [
   { href: "/", label: "Landing" },
-  { href: "/dashboard", label: "Dashboard" },
   { href: "/demo", label: "Demo Console" },
+  { href: "/dashboard", label: "Dashboard" },
 ];
 
 export function Nav() {

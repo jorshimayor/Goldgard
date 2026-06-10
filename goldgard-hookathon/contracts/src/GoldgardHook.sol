@@ -38,6 +38,7 @@ import {
 import {StateLibrary} from "v4-core/libraries/StateLibrary.sol";
 import {TickMath} from "v4-core/libraries/TickMath.sol";
 import {LPFeeLibrary} from "v4-core/libraries/LPFeeLibrary.sol";
+import {FullMath} from "v4-core/libraries/FullMath.sol";
 
 import {BaseHook} from "./libraries/BaseHook.sol";
 import {Transient} from "./libraries/Transient.sol";
@@ -46,6 +47,10 @@ import {SafetyModule} from "./SafetyModule.sol";
 import {HedgeReserve} from "./HedgeReserve.sol";
 import {RewardDistributor} from "./RewardDistributor.sol";
 
+/// @title Goldgard Hook
+/// @notice Main Uniswap v4 hook for Goldgard. It defends swaps with oracle-aware
+///         fees and a circuit breaker, routes insurance premiums into the safety
+///         module, tracks LP eligibility for claims, and coordinates reserve rebalancing.
 contract GoldgardHook is BaseHook, Ownable2Step, IUnlockCallback {
     using Hooks for IHooks;
     using PoolIdLibrary for PoolKey;
@@ -126,6 +131,7 @@ contract GoldgardHook is BaseHook, Ownable2Step, IUnlockCallback {
     bytes32 internal constant TS_REBALANCE_AMOUNT_OUT =
         keccak256("GGARD/rebalance/amountOut");
 
+    /// @notice Per-pool fee, breaker, and rebalance policy.
     struct PoolConfig {
         uint24 baseLpFee;
         uint24 maxLpFee;
@@ -138,6 +144,7 @@ contract GoldgardHook is BaseHook, Ownable2Step, IUnlockCallback {
         uint64 pausedUntil;
     }
 
+    /// @notice Per-position state used for enrollment, eligibility, and claim previews.
     struct PositionInfo {
         uint128 liquidity;
         uint64 lastTimestamp;
@@ -203,6 +210,7 @@ contract GoldgardHook is BaseHook, Ownable2Step, IUnlockCallback {
         _;
     }
 
+    /// @notice Sets the Reactive callback proxy address once for this hook.
     function setReactiveCallbackProxy(address proxy) external onlyOwner {
         if (proxy == address(0)) revert BadConfig();
         if (reactiveCallbackProxy != address(0)) revert BadConfig();
@@ -210,57 +218,67 @@ contract GoldgardHook is BaseHook, Ownable2Step, IUnlockCallback {
         emit ReactiveCallbackProxySet(proxy);
     }
 
+    /// @notice Sets the address allowed to mutate alert and premium policy.
     function setAuthorizedCaller(address caller) external onlyOwner {
         if (caller == address(0)) revert BadConfig();
         authorizedCaller = caller;
         emit AuthorizedCallerSet(caller);
     }
 
+    /// @notice Sets the maximum claim coverage cap in basis points.
     function setCoverageCapBps(uint256 newCapBps) external onlyOwner {
         if (newCapBps > MAX_COVERAGE_CAP_BPS) revert BadConfig();
         coverageCapBps = OZSafeCast.toUint16(newCapBps);
     }
 
+    /// @notice Returns the active Reactive alert level and its expiry.
     function getReactiveAlert() external view returns (uint8 level, uint64 until) {
         uint256 packed = reactiveAlert;
         level = uint8(packed);
         until = uint64(packed >> 8);
     }
 
+    /// @notice Stores a temporary alert that pre-warms the defensive fee curve.
     function setAlertLevel(uint8 level) external onlyAuthorized {
         uint64 until = uint64(block.timestamp + ALERT_TTL_SECONDS);
         reactiveAlert = (uint256(until) << 8) | uint256(level);
         emit AlertLevelRaised(level, until);
     }
 
+    /// @notice Backwards-compatible alias for `setAlertLevel`.
     function raiseAlertLevel(uint8 level) external onlyAuthorized {
         uint64 until = uint64(block.timestamp + ALERT_TTL_SECONDS);
         reactiveAlert = (uint256(until) << 8) | uint256(level);
         emit AlertLevelRaised(level, until);
     }
 
+    /// @notice Sets the minimum size required before a pending rebalance can execute.
     function setRebalanceThreshold(uint256 newThreshold) external onlyAuthorized {
         minRebalanceAmountIn = newThreshold;
         emit RebalanceThresholdTightened(newThreshold);
     }
 
+    /// @notice Backwards-compatible alias for `setRebalanceThreshold`.
     function tightenRebalanceThreshold(uint256 newThreshold) external onlyAuthorized {
         minRebalanceAmountIn = newThreshold;
         emit RebalanceThresholdTightened(newThreshold);
     }
 
+    /// @notice Sets the swap premium rate in basis points.
     function setPremiumRate(uint256 newRateBps) external onlyAuthorized {
         if (newRateBps > MAX_PREMIUM_BPS) revert BadConfig();
         premiumBps = OZSafeCast.toUint16(newRateBps);
         emit PremiumRateAdjusted(premiumBps);
     }
 
+    /// @notice Backwards-compatible alias for `setPremiumRate`.
     function adjustPremiumRate(uint256 newRateBps) external onlyAuthorized {
         if (newRateBps > MAX_PREMIUM_BPS) revert BadConfig();
         premiumBps = OZSafeCast.toUint16(newRateBps);
         emit PremiumRateAdjusted(premiumBps);
     }
 
+    /// @notice Registers pool-specific fee, breaker, and rebalance settings.
     function setPoolConfig(
         PoolKey calldata key,
         PoolConfig calldata cfg
@@ -271,6 +289,8 @@ contract GoldgardHook is BaseHook, Ownable2Step, IUnlockCallback {
         poolKeys[key.toId()] = key;
     }
 
+    /// @notice Computes the dynamic LP fee before each swap.
+    /// @dev This is the core defense path: refresh oracle state, enforce the breaker, then override the fee.
     function beforeSwap(
         address,
         PoolKey calldata key,
@@ -318,10 +338,14 @@ contract GoldgardHook is BaseHook, Ownable2Step, IUnlockCallback {
         (spotSqrtPriceX96, , , ) = manager.getSlot0(poolId);
 
         (uint160 clSqrtPriceX96, bool ok) = oracle.getChainlinkSqrtPriceX96(key);
-        uint160 twapSqrtPriceX96 = oracle.getTwapSqrtPriceX96(key, twapWindowSeconds);
+        (
+            uint160 twapSqrtPriceX96,
+            bool twapOk
+        ) = oracle.getTwapSqrtPriceX96IfFresh(key, twapWindowSeconds);
+        // Prefer fresh Chainlink when available, but keep recent pool activity as a live-safe fallback.
         oracleSqrtPriceX96 = ok ? clSqrtPriceX96 : twapSqrtPriceX96;
 
-        if (clSqrtPriceX96 != 0 && twapSqrtPriceX96 != 0) {
+        if (ok && twapOk) {
             uint256 twap = _price1e18FromSqrt(twapSqrtPriceX96);
             uint256 external_ = _price1e18FromSqrt(clSqrtPriceX96);
             uint256 oracleDeviationBps = _deviationBps256(twap, external_);
@@ -342,6 +366,7 @@ contract GoldgardHook is BaseHook, Ownable2Step, IUnlockCallback {
         revert OracleDeviationTooHigh(deviationBps);
     }
 
+    /// @dev Raises the effective deviation floor while a Reactive alert is still active.
     function _applyReactiveAlertBump(
         PoolConfig storage cfg,
         uint256 deviationBps
@@ -357,6 +382,7 @@ contract GoldgardHook is BaseHook, Ownable2Step, IUnlockCallback {
         return deviationBps > bumped ? deviationBps : bumped;
     }
 
+    /// @dev Converts deviation into an LP fee, capped by the configured max fee.
     function _computeDynamicFee(
         PoolConfig storage cfg,
         uint256 deviationBps
@@ -370,6 +396,7 @@ contract GoldgardHook is BaseHook, Ownable2Step, IUnlockCallback {
         return OZSafeCast.toUint24(candidate);
     }
 
+    /// @notice Pulls the swap-funded premium after execution and updates reserve/reward state.
     function afterSwap(
         address sender,
         PoolKey calldata key,
@@ -382,6 +409,7 @@ contract GoldgardHook is BaseHook, Ownable2Step, IUnlockCallback {
         return _afterSwap(sender, key, params, delta);
     }
 
+    /// @dev Moves premium into the safety module and tracks a portion of flow for later rebalancing.
     function _afterSwap(
         address sender,
         PoolKey calldata key,
@@ -406,6 +434,7 @@ contract GoldgardHook is BaseHook, Ownable2Step, IUnlockCallback {
         return (GoldgardHook.afterSwap.selector, premium.toInt128());
     }
 
+    /// @dev Computes the premium on the swap leg chosen by Uniswap's balance delta semantics.
     function _computePremium(
         PoolKey calldata key,
         SwapParams calldata params,
@@ -420,6 +449,7 @@ contract GoldgardHook is BaseHook, Ownable2Step, IUnlockCallback {
         premium = (swapAmountAbs * uint256(premiumBps)) / BPS;
     }
 
+    /// @dev Converts non-reserve premiums into token1, then deposits them into the safety module.
     function _depositPremium(
         PoolKey calldata key,
         PoolConfig memory cfg,
@@ -446,6 +476,7 @@ contract GoldgardHook is BaseHook, Ownable2Step, IUnlockCallback {
         return converted;
     }
 
+    /// @dev Records pending hedge volume so rebalancing can be executed out-of-band.
     function _trackPendingRebalance(
         PoolId poolId,
         PoolConfig memory cfg,
@@ -467,6 +498,7 @@ contract GoldgardHook is BaseHook, Ownable2Step, IUnlockCallback {
         }
     }
 
+    /// @notice Tracks liquidity additions so LPs can later qualify for coverage and claims.
     function afterAddLiquidity(
         address sender,
         PoolKey calldata key,
@@ -483,6 +515,7 @@ contract GoldgardHook is BaseHook, Ownable2Step, IUnlockCallback {
         return _afterAddLiquidity(sender, key, params, delta, hookData);
     }
 
+    /// @dev Updates insured position state after liquidity is added and captures enrollment pricing.
     function _afterAddLiquidity(
         address sender,
         PoolKey calldata key,
@@ -526,6 +559,7 @@ contract GoldgardHook is BaseHook, Ownable2Step, IUnlockCallback {
         (, tick, , ) = manager.getSlot0(poolId);
     }
 
+    /// @dev Converts newly added principal into token1 terms for later claim accounting.
     function _applyPrincipalOnAdd(
         PositionInfo storage p,
         PoolKey calldata key,
@@ -542,6 +576,7 @@ contract GoldgardHook is BaseHook, Ownable2Step, IUnlockCallback {
         p.principalToken1 += amount1 + Math.mulDiv(amount0, price1e18, 1e18);
     }
 
+    /// @dev Locks the position's initial reference price so IL can be measured later.
     function _enrollIfNeededByKey(
         bytes32 positionKey,
         PoolKey calldata key,
@@ -549,12 +584,17 @@ contract GoldgardHook is BaseHook, Ownable2Step, IUnlockCallback {
     ) internal {
         PositionInfo storage p = positions[positionKey];
         if (p.enrolledSqrtPriceX96 != 0) return;
-        (uint160 clSqrtPriceX96, bool ok) = oracle.getChainlinkSqrtPriceX96(key);
-        if (!ok || clSqrtPriceX96 == 0) revert OracleUnavailable();
-        p.enrolledSqrtPriceX96 = clSqrtPriceX96;
+        uint32 window = poolConfig[key.toId()].twapWindowSeconds;
+        (uint160 referenceSqrtPriceX96, ) = oracle.getReferenceSqrtPriceX96(
+            key,
+            window
+        );
+        if (referenceSqrtPriceX96 == 0) revert OracleUnavailable();
+        p.enrolledSqrtPriceX96 = referenceSqrtPriceX96;
         emit LiquidityEnrolled(key.toId(), positionKey, owner, p.liquidity);
     }
 
+    /// @notice Updates insured position state when liquidity is removed.
     function afterRemoveLiquidity(
         address sender,
         PoolKey calldata key,
@@ -614,6 +654,7 @@ contract GoldgardHook is BaseHook, Ownable2Step, IUnlockCallback {
         return (GoldgardHook.afterRemoveLiquidity.selector, toBalanceDelta(0, 0));
     }
 
+    /// @notice Returns whether an LP position spent enough time in range to qualify for coverage.
     function isEligible(
         address account,
         PoolId poolId
@@ -637,6 +678,8 @@ contract GoldgardHook is BaseHook, Ownable2Step, IUnlockCallback {
         return inRange * 100 >= total * 80;
     }
 
+    /// @notice Estimates the LP's insurance payout from impermanent loss since enrollment.
+    /// @dev Payout is capped by both the configured coverage cap and available reserve assets.
     function previewClaim(
         address account,
         PoolId poolId
@@ -670,6 +713,7 @@ contract GoldgardHook is BaseHook, Ownable2Step, IUnlockCallback {
         if (payoutAssets > available) payoutAssets = available;
     }
 
+    /// @notice Executes a reserve-backed hedge rebalance for accumulated pending flow.
     function rebalance(
         PoolKey calldata key,
         bool zeroForOne,
@@ -696,6 +740,7 @@ contract GoldgardHook is BaseHook, Ownable2Step, IUnlockCallback {
         emit RebalanceExecuted(poolId, zeroForOne, amountIn, amountOut);
     }
 
+    /// @notice Pool-manager callback that performs the rebalance atomically inside `unlock`.
     function unlockCallback(
         bytes calldata data
     ) external override onlyPoolManager returns (bytes memory) {
@@ -721,6 +766,7 @@ contract GoldgardHook is BaseHook, Ownable2Step, IUnlockCallback {
         return abi.encode(amountOut);
     }
 
+    /// @dev Performs the actual swap leg of the rebalance and settles the reserve-facing transfers.
     function _rebalanceSwap(
         PoolKey memory key,
         bool zeroForOne,
@@ -771,6 +817,7 @@ contract GoldgardHook is BaseHook, Ownable2Step, IUnlockCallback {
         }
     }
 
+    /// @dev Allows integrators to pass the logical LP owner through 20 bytes of hook data.
     function _resolveOwner(
         address sender,
         bytes calldata hookData
@@ -829,12 +876,11 @@ contract GoldgardHook is BaseHook, Ownable2Step, IUnlockCallback {
     }
 
     function _price1e18FromSqrt(uint160 sqrtPriceX96) internal pure returns (uint256) {
-        uint256 price = Math.mulDiv(
-            uint256(sqrtPriceX96),
-            uint256(sqrtPriceX96),
-            uint256(1) << 192
-        );
-        return Math.mulDiv(price, 1e18, 1);
+        uint256 a = uint256(sqrtPriceX96);
+        uint256 denom = uint256(1) << 192;
+        uint256 q = FullMath.mulDiv(a, a, denom);
+        uint256 r = mulmod(a, a, denom);
+        return (q * 1e18) + Math.mulDiv(r, 1e18, denom);
     }
 
     function _impermanentLossBps(

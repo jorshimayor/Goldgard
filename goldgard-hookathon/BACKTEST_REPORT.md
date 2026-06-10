@@ -119,7 +119,6 @@ No parameter changes were required to eliminate shortfalls in the baseline run.
 To support tuning in future backtests and testnet validation, the Sepolia hook now supports a **coverage cap** (hard cap on IL bps applied):
 
 - `GoldgardHook.coverageCapBps` default: `10_000` (no cap)
-- Settable at deploy time via `COVERAGE_CAP_BPS` in [DeployDemo.s.sol](file:///home/jorel/Goldgard/goldgard-hookathon/contracts/script/DeployDemo.s.sol)
 
 This cap allows controlling worst-case payout amplification during extreme regimes.
 
@@ -127,21 +126,4 @@ This cap allows controlling worst-case payout amplification during extreme regim
 
 - Since no adjustments were required, validation is satisfied by the baseline results (no shortfall across volatile/calm/drift windows).
 - The codebase supports re-running the backtest across deeper historical regimes by extending block ranges and/or narrowing log chunk size as needed.
-
-## 7) Reproducibility Guide
-
-### Run backtest
-From `goldgard-hookathon/frontend`:
-
-```bash
-pnpm install --frozen-lockfile
-LOOKBACK_BLOCKS=120000 LOG_STEP_BLOCKS=500 WINDOW_SWAPS=800 PREMIUM_BPS=2 node scripts/backtest.mjs
-```
-
-### Target specific historical ranges
-```bash
-FROM_BLOCK=<start> TO_BLOCK=<end> LOG_STEP_BLOCKS=250 WINDOW_SWAPS=800 node scripts/backtest.mjs
-```
-
-If your RPC times out on `eth_getLogs`, reduce `LOG_STEP_BLOCKS`.
 

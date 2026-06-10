@@ -3,8 +3,7 @@
 import { RainbowKitProvider, darkTheme, getDefaultConfig } from "@rainbow-me/rainbowkit";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
-import { http, useAccount, useChainId, useSwitchChain, WagmiProvider } from "wagmi";
-import { sepolia } from "wagmi/chains";
+import { http, WagmiProvider } from "wagmi";
 
 import { rpcHttpPath, supportedChains } from "../lib/networks";
 
@@ -24,32 +23,18 @@ function getWagmiConfig() {
     return globalForProviders.__gg_wagmiConfig;
   }
 
+  const transports = Object.fromEntries(supportedChains.map((c) => [c.id, http(rpcHttpPath(c.id))]));
+
   const next = getDefaultConfig({
     appName: "Goldgard Hook",
     projectId,
     chains: supportedChains,
-    transports: {
-      [sepolia.id]: http(rpcHttpPath(sepolia.id)),
-    },
+    transports,
     ssr: false,
   });
   globalForProviders.__gg_wagmiConfig = next;
   globalForProviders.__gg_wagmiConfigKey = wagmiConfigKey;
   return next;
-}
-
-function SepoliaEnforcer() {
-  const { isConnected } = useAccount();
-  const chainId = useChainId();
-  const { switchChain } = useSwitchChain();
-
-  useEffect(() => {
-    if (!isConnected) return;
-    if (chainId === sepolia.id) return;
-    switchChain({ chainId: sepolia.id });
-  }, [chainId, isConnected, switchChain]);
-
-  return null;
 }
 
 export function Providers({ children }: { children: React.ReactNode }) {
@@ -76,7 +61,6 @@ export function Providers({ children }: { children: React.ReactNode }) {
             overlayBlur: "small",
           })}
         >
-          <SepoliaEnforcer />
           {showChildren ? children : null}
         </RainbowKitProvider>
       </QueryClientProvider>

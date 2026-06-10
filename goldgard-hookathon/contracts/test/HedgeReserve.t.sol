@@ -64,6 +64,7 @@ contract HedgeReserveTest is Test {
         OracleAdapter.PoolOracleConfig memory oCfg = OracleAdapter.PoolOracleConfig({
             aggregator: IChainlinkAggregatorV3(address(agg)),
             maxStaleSeconds: 3600,
+            maxPoolStaleSeconds: 3600,
             aggregatorDecimals: 8,
             token0Decimals: 18,
             token1Decimals: 18
@@ -105,6 +106,7 @@ contract HedgeReserveTest is Test {
     }
 
     function testConvertRevertsOnSpotOracleDeviation() public {
+        hedge.setMaxSpotOracleDeviationBps(200);
         SwapParams memory p = SwapParams({
             zeroForOne: true,
             amountSpecified: -int256(1000e18),

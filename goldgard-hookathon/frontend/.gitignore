@@ -39,3 +39,7 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+
+/DESIGN_SYSTEM.md/
+/FRONTEND_ROUTES_AND_E2E_GUIDE.md/

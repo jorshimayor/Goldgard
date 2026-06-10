@@ -11,6 +11,9 @@ import {
     SwapParams
 } from "v4-core/types/PoolOperation.sol";
 
+/// @title Base Hook Skeleton
+/// @notice Lightweight helper that pins a hook to a single pool manager and
+///         deliberately reverts unimplemented hook callbacks.
 abstract contract BaseHook is IHooks {
     error HookNotImplemented();
     error OnlyPoolManager();
@@ -21,6 +24,7 @@ abstract contract BaseHook is IHooks {
         manager = _manager;
     }
 
+    /// @notice Restricts hook entrypoints to the configured Uniswap v4 pool manager.
     modifier onlyPoolManager() {
         if (msg.sender != address(manager)) revert OnlyPoolManager();
         _;

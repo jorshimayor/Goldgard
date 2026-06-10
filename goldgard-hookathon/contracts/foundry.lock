@@ -11,6 +11,12 @@
       "rev": "976783905db8fa58ed85f66e67dd8cd5a989743a"
     }
   },
+  "lib/reactive-lib": {
+    "tag": {
+      "name": "v0.2.0",
+      "rev": "d664678a7d86204c9391af4cedfd5ae0b0b904e4"
+    }
+  },
   "lib/solmate": {
     "tag": {
       "name": "v6",
@@ -22,5 +28,8 @@
       "name": "v4.0.0",
       "rev": "46c6834698c48bc4a463a86d8420f4eb1d7f3b75"
     }
+  },
+  "lib/v4-periphery": {
+    "rev": "9dafaaecc1e2e1e824eda9d941085f96517d827b"
   }
 }

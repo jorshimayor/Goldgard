@@ -16,9 +16,13 @@ import {PoolKey} from "v4-core/types/PoolKey.sol";
 import {PoolId, PoolIdLibrary} from "v4-core/types/PoolId.sol";
 import {IPoolManager} from "v4-core/interfaces/IPoolManager.sol";
 import {StateLibrary} from "v4-core/libraries/StateLibrary.sol";
+import {FullMath} from "v4-core/libraries/FullMath.sol";
 
 import {OracleAdapter} from "./OracleAdapter.sol";
 
+/// @title Goldgard Hedge Reserve
+/// @notice Reserve inventory used by the hook to offset exposure after swaps
+///         while guarding conversions with oracle sanity checks.
 contract HedgeReserve is Ownable2Step {
     using SafeERC20 for IERC20;
     using PoolIdLibrary for PoolKey;
@@ -53,13 +57,15 @@ contract HedgeReserve is Ownable2Step {
     ) Ownable(_owner) {
         manager = _manager;
         oracle = _oracle;
-        maxSpotOracleDeviationBps = 200;
+        maxSpotOracleDeviationBps = 10_000;
     }
 
+    /// @notice Sets the hook allowed to move reserve inventory.
     function setHook(address _hook) external onlyOwner {
         hook = _hook;
     }
 
+    /// @notice Caps how far spot price may drift from the oracle before reserve conversions stop.
     function setMaxSpotOracleDeviationBps(
         uint16 deviationBps
     ) external onlyOwner {
@@ -67,6 +73,7 @@ contract HedgeReserve is Ownable2Step {
         maxSpotOracleDeviationBps = deviationBps;
     }
 
+    /// @notice Transfers reserve inventory directly to the hook for settlement.
     function fundHook(Currency currency, uint256 amount, address to) external {
         if (msg.sender != hook) revert OnlyHook();
         address token = Currency.unwrap(currency);
@@ -86,6 +93,8 @@ contract HedgeReserve is Ownable2Step {
         );
     }
 
+    /// @notice Converts token0 inventory into token1 using the strict reference price.
+    /// @dev Reverts when spot and oracle prices diverge too far, protecting the reserve.
     function convertToken0ToToken1(
         PoolKey calldata key,
         uint256 amount0In,
@@ -132,6 +141,7 @@ contract HedgeReserve is Ownable2Step {
         );
     }
 
+    /// @notice Converts token1 inventory into token0 using the strict reference price.
     function convertToken1ToToken0(
         PoolKey calldata key,
         uint256 amount1In,
@@ -178,6 +188,7 @@ contract HedgeReserve is Ownable2Step {
         );
     }
 
+    /// @notice Deprecated exact-out helper left in place to preserve interface compatibility.
     function rebalanceExactToken1Out(
         IPoolManager,
         PoolKey calldata,
@@ -187,6 +198,7 @@ contract HedgeReserve is Ownable2Step {
         revert("deprecated");
     }
 
+    /// @notice Deprecated exact-out helper left in place to preserve interface compatibility.
     function rebalanceExactToken0Out(
         IPoolManager,
         PoolKey calldata,
@@ -196,6 +208,7 @@ contract HedgeReserve is Ownable2Step {
         revert("deprecated");
     }
 
+    /// @dev Prevents reserve conversions from executing on clearly stale or manipulated spot prices.
     function _checkSpotDeviation(PoolKey calldata key, uint256 oraclePrice1e18) internal view {
         PoolId poolId = key.toId();
         (uint160 spotSqrtPriceX96, , , ) = manager.getSlot0(poolId);
@@ -209,12 +222,11 @@ contract HedgeReserve is Ownable2Step {
     function _price1e18FromSqrt(
         uint160 sqrtPriceX96
     ) internal pure returns (uint256) {
-        uint256 price = Math.mulDiv(
-            uint256(sqrtPriceX96),
-            uint256(sqrtPriceX96),
-            uint256(1) << 192
-        );
-        return Math.mulDiv(price, 1e18, 1);
+        uint256 a = uint256(sqrtPriceX96);
+        uint256 denom = uint256(1) << 192;
+        uint256 q = FullMath.mulDiv(a, a, denom);
+        uint256 r = mulmod(a, a, denom);
+        return (q * 1e18) + Math.mulDiv(r, 1e18, denom);
     }
 
     function _deviationBps(

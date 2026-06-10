@@ -41,6 +41,11 @@ import {HookMiner} from "./utils/HookMiner.sol";
 contract GoldgardHookTest is Test {
     using LPFeeLibrary for uint24;
 
+    event ReactiveAlertLevelHandled(uint8 level);
+    event ReactiveTightenThresholdHandled(uint256 newThreshold);
+    event ReactivePremiumRateHandled(uint256 newRateBps);
+    event ReactiveEpochCheckpointHandled();
+
     PoolManager internal manager;
     PoolModifyLiquidityTestNoChecks internal liqRouter;
     SwapRouterNoChecks internal swapRouter;
@@ -133,6 +138,7 @@ contract GoldgardHookTest is Test {
             .PoolOracleConfig({
                 aggregator: IChainlinkAggregatorV3(address(agg)),
                 maxStaleSeconds: 3600,
+                maxPoolStaleSeconds: 3600,
                 aggregatorDecimals: 8,
                 token0Decimals: 18,
                 token1Decimals: 18
@@ -335,6 +341,8 @@ contract GoldgardHookTest is Test {
         vm.expectRevert(GoldgardCallbackReceiver.OnlyReactiveCallbackProxy.selector);
         receiver.handleAlertLevel(1);
 
+        vm.expectEmit(false, false, false, true, address(receiver));
+        emit ReactiveAlertLevelHandled(1);
         vm.prank(reactiveCallbackProxy);
         receiver.handleAlertLevel(1);
 
@@ -386,6 +394,8 @@ contract GoldgardHookTest is Test {
 
     function testReceiverTightenThresholdMaxUnsetAllowsAnyAboveMin() public {
         receiver.setBounds(3, 10, 0, 100);
+        vm.expectEmit(false, false, false, true, address(receiver));
+        emit ReactiveTightenThresholdHandled(11);
         vm.prank(reactiveCallbackProxy);
         receiver.handleTightenThreshold(11);
         assertEq(hook.minRebalanceAmountIn(), 11);
@@ -395,6 +405,23 @@ contract GoldgardHookTest is Test {
         receiver.setTargets(address(0xBEEF), address(0xFEED));
         assertEq(receiver.hook(), address(0xBEEF));
         assertEq(receiver.safetyModule(), address(0xFEED));
+    }
+
+    function testReceiverAcceptsReactivePayloadSenderWhenConfigured() public {
+        receiver.setReactiveContract(address(0xCA11));
+
+        vm.expectEmit(false, false, false, true, address(receiver));
+        emit ReactiveAlertLevelHandled(1);
+        vm.prank(reactiveCallbackProxy);
+        receiver.handleAlertLevel(address(0xCA11), 1);
+    }
+
+    function testReceiverRejectsUnexpectedReactivePayloadSender() public {
+        receiver.setReactiveContract(address(0xCA11));
+
+        vm.prank(reactiveCallbackProxy);
+        vm.expectRevert(GoldgardCallbackReceiver.BadConfig.selector);
+        receiver.handleAlertLevel(address(0xBEEF), 1);
     }
 
     function testReceiverBoundsEnforced() public {
@@ -418,6 +445,8 @@ contract GoldgardHookTest is Test {
     }
 
     function testRaiseAlertLevelLevel2AppliesBiggerBump() public {
+        vm.expectEmit(false, false, false, true, address(receiver));
+        emit ReactiveAlertLevelHandled(2);
         vm.prank(reactiveCallbackProxy);
         receiver.handleAlertLevel(2);
 
@@ -601,6 +630,7 @@ contract GoldgardHookTest is Test {
         OracleAdapter.PoolOracleConfig memory oCfg = OracleAdapter.PoolOracleConfig({
             aggregator: IChainlinkAggregatorV3(address(0)),
             maxStaleSeconds: 3600,
+            maxPoolStaleSeconds: 3600,
             aggregatorDecimals: 8,
             token0Decimals: 18,
             token1Decimals: 18
@@ -644,6 +674,7 @@ contract GoldgardHookTest is Test {
     function testCoverageCapLimitsPayout() public {
         hook.setCoverageCapBps(1);
         agg.setAnswer(2e8);
+        token1.mint(address(safety), 1e18);
 
         PoolId poolId = key.toId();
         bytes32 positionKey = keccak256(
