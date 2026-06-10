@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useState } from "react";
 import { ArrowRight, Shield, Waves, Swords, Zap, Lock, TrendingUp, BarChart3, CircleHelp, X } from "lucide-react";
-import { Display, Subhead, Body, Data, RuneStone, LeverageRune } from "@/components/DesignComponents";
+import { Display, Subhead, Body, Data, RuneStone } from "@/components/DesignComponents";
 
 export default function Home() {
   const [helpOpen, setHelpOpen] = useState(false);
@@ -37,25 +37,32 @@ export default function Home() {
               </Body>
 
               <div className="flex flex-col gap-4 sm:flex-row pt-4">
-                <LeverageRune className="h-12 px-6">
-                  <Link href="/dashboard" className="flex items-center gap-2 w-full h-full justify-center">
-                    Enter the Shieldwall
-                    <ArrowRight className="h-4 w-4" />
-                  </Link>
-                </LeverageRune>
                 <Link
-                  href="/demo"
-                  className="group inline-flex h-12 items-center justify-center rounded-xl border border-aged-gold/50 bg-gg-surface/30 px-6 font-semibold text-foreground hover:bg-gg-surface/50 hover:border-aged-gold transition-all duration-300 backdrop-blur-sm"
+                  href="/dashboard"
+                  className="group relative inline-flex h-14 min-w-[16rem] items-center justify-center gap-3 overflow-hidden rounded-2xl border border-aged-gold/60 bg-[radial-gradient(circle_at_top,rgba(255,231,163,0.22),rgba(212,175,119,0.12)_35%,rgba(20,12,5,0.92)_100%)] px-8 font-semibold text-foreground shadow-[0_0_0_1px_rgba(212,175,119,0.12),0_14px_40px_rgba(0,0,0,0.35)] transition-all duration-300 hover:-translate-y-0.5 hover:border-pale-gold hover:shadow-[0_0_0_1px_rgba(245,227,166,0.28),0_0_34px_rgba(212,175,119,0.2),0_18px_44px_rgba(0,0,0,0.45)]"
                 >
-                  <span className="flex items-center gap-2">
-                    Run the Demo Console
-                    <Zap className="h-4 w-4 group-hover:text-aged-gold transition-colors" />
+                  <div className="absolute inset-0 bg-gradient-to-r from-aged-gold/20 via-transparent to-pale-gold/10 opacity-0 transition-opacity duration-300 group-hover:opacity-100" />
+                  <span className="relative flex items-center gap-3">
+                    Enter the Shieldwall
+                    <ArrowRight className="h-4 w-4 text-aged-gold transition-transform duration-300 group-hover:translate-x-1" />
                   </span>
                 </Link>
+                <Link
+                  href="/demo"
+                  className="group relative inline-flex h-14 min-w-[16rem] items-center justify-center gap-3 overflow-hidden rounded-2xl border border-aged-gold/45 bg-gradient-to-r from-aged-gold/12 to-gg-surface/40 px-8 font-semibold text-foreground shadow-[0_10px_28px_rgba(0,0,0,0.28)] transition-all duration-300 hover:-translate-y-0.5 hover:border-aged-gold hover:shadow-[0_0_0_1px_rgba(212,175,119,0.18),0_0_28px_rgba(212,175,119,0.14),0_16px_38px_rgba(0,0,0,0.38)] backdrop-blur-sm"
+                >
+                  <div className="absolute inset-0 bg-gradient-to-r from-aged-gold/16 to-pale-gold/6 opacity-0 transition-opacity duration-300 group-hover:opacity-100" />
+                  <span className="relative flex items-center gap-3">
+                    Run the Demo Console
+                    <Zap className="h-4 w-4 text-aged-gold transition-transform duration-300 group-hover:scale-110" />
+                  </span>
+                </Link>
+              </div>
+              <div className="pt-1">
                 <button
                   type="button"
                   onClick={() => setHelpOpen(true)}
-                  className="inline-flex h-12 items-center justify-center gap-2 rounded-xl border border-gg-border/50 bg-gg-surface/30 px-6 font-semibold text-foreground transition-all duration-300 hover:border-aged-gold/50 hover:bg-gg-surface/50 backdrop-blur-sm cursor-pointer"
+                  className="inline-flex items-center gap-2 text-sm font-semibold text-aged-gold/90 transition-colors duration-300 hover:text-pale-gold cursor-pointer"
                 >
                   <CircleHelp className="h-4 w-4 text-aged-gold" />
                   How To Use Goldgard
@@ -144,9 +151,6 @@ export default function Home() {
                   <Body className="text-gg-muted text-sm mt-3">
                     {feature.description}
                   </Body>
-                  <div className="pt-2 text-aged-gold text-sm font-medium hover:translate-x-1 transition-transform inline-block cursor-pointer">
-                    Learn more →
-                  </div>
                 </RuneStone>
               );
             })}
@@ -182,21 +186,6 @@ export default function Home() {
             <Body className="mx-auto max-w-2xl text-lg text-gg-muted">
               Join us in revolutionizing LST liquidity provision.
             </Body>
-          </div>
-
-          <div className="flex flex-col sm:flex-row gap-4 justify-center">
-            <LeverageRune className="h-14 px-10">
-              <Link href="/dashboard" className="flex items-center gap-2 w-full h-full justify-center">
-                Launch Dashboard
-              </Link>
-            </LeverageRune>
-            <Link
-              href="/demo"
-              className="group relative inline-flex h-14 items-center justify-center gap-2 rounded-xl border border-aged-gold/50 px-8 font-semibold text-foreground overflow-hidden backdrop-blur-sm"
-            >
-              <div className="absolute inset-0 bg-gradient-to-r from-aged-gold/10 to-pale-gold/10 opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
-              <span className="relative">Try Demo Console</span>
-            </Link>
           </div>
         </section>
       </div>
