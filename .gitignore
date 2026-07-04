@@ -11,3 +11,6 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
+.claude/
+# Private product repo (own git repo — never commit into the public Goldgard repo)
+luberty/
