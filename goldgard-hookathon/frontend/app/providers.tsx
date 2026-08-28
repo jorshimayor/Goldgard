@@ -5,7 +5,6 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { http, WagmiProvider } from "wagmi";
 
-import OnchainSuiteNotifications from "../components/OnchainSuiteNotifications";
 import { rpcHttpPath, supportedChains } from "../lib/networks";
 
 const projectId = process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID ?? "00000000000000000000000000000000";
@@ -62,7 +61,6 @@ export function Providers({ children }: { children: React.ReactNode }) {
             overlayBlur: "small",
           })}
         >
-          <OnchainSuiteNotifications />
           {showChildren ? children : null}
         </RainbowKitProvider>
       </QueryClientProvider>
