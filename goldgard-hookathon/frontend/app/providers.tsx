@@ -6,6 +6,9 @@ import { useEffect, useState } from "react";
 import { http, WagmiProvider } from "wagmi";
 
 import { rpcHttpPath, supportedChains } from "../lib/networks";
+import { useAccount } from "wagmi";
+import { OnchainInApp } from "@/components/OnchainInApp";
+
 
 const projectId = process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID ?? "00000000000000000000000000000000";
 
@@ -17,6 +20,10 @@ const globalForProviders = globalThis as unknown as {
 
 const queryClient = (globalForProviders.__gg_queryClient ??= new QueryClient());
 
+function OnchainMount() {
+  const { address } = useAccount();
+  return address ? <OnchainInApp wallet={address} /> : null;
+}
 function getWagmiConfig() {
   const wagmiConfigKey = supportedChains.map((c) => c.id).join(",");
   if (globalForProviders.__gg_wagmiConfig && globalForProviders.__gg_wagmiConfigKey === wagmiConfigKey) {
@@ -61,6 +68,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
             overlayBlur: "small",
           })}
         >
+          <OnchainMount />
           {showChildren ? children : null}
         </RainbowKitProvider>
       </QueryClientProvider>
