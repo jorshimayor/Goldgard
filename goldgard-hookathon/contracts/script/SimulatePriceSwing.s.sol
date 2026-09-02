@@ -42,7 +42,7 @@ contract SimulatePriceSwing is Script {
 
         _loadFromConfig(raw);
         address trader = _startBroadcast();
-        _tuneConfigs();
+        _tuneConfigs(trader);
         _simulate(trader);
         vm.stopBroadcast();
     }
@@ -91,15 +91,28 @@ contract SimulatePriceSwing is Script {
         }
     }
 
-    function _tuneConfigs() internal {
+    function _tuneConfigs(address trader) internal {
+        // These setters are onlyOwner. A try/catch is NOT enough: vm.startBroadcast
+        // records the call for broadcast before the revert is caught, so forge
+        // then aborts the whole run in its pre-broadcast simulation — which is
+        // why a non-owner trader could not run this script at all.
+        //
+        // Skipping them when the sender is not the owner is also the more
+        // realistic path: an ordinary swapper never owns the hook, and the
+        // tuning is a demo convenience, not something a swap needs.
+        bool ownsHedge = _isOwner(address(hedge), trader);
+        bool ownsHook = _isOwner(address(hook), trader);
+        if (!ownsHedge && !ownsHook) return;
         uint256 maxDevBps = vm.envOr(
             "MAX_SPOT_ORACLE_DEVIATION_BPS",
             uint256(type(uint16).max)
         );
         if (maxDevBps == 0) maxDevBps = type(uint16).max;
         if (maxDevBps > type(uint16).max) maxDevBps = type(uint16).max;
-        try hedge.setMaxSpotOracleDeviationBps(uint16(maxDevBps)) {} catch {
-            try hedge.setMaxSpotOracleDeviationBps(10_000) {} catch {}
+        if (ownsHedge) {
+            try hedge.setMaxSpotOracleDeviationBps(uint16(maxDevBps)) {} catch {
+                try hedge.setMaxSpotOracleDeviationBps(10_000) {} catch {}
+            }
         }
 
         (
@@ -149,7 +162,18 @@ contract SimulatePriceSwing is Script {
         cfg.circuitBreakerCooldownSeconds = uint32(hookCbCooldown);
         if (resetPause) cfg.pausedUntil = 0;
 
-        try hook.setPoolConfig(key, cfg) {} catch {}
+        if (ownsHook) {
+            try hook.setPoolConfig(key, cfg) {} catch {}
+        }
+    }
+
+    /// @dev Ownable v5 `owner()`, read without reverting on a contract lacking it.
+    function _isOwner(address target, address who) internal view returns (bool) {
+        (bool ok, bytes memory out) = target.staticcall(
+            abi.encodeWithSignature("owner()")
+        );
+        if (!ok || out.length < 32) return false;
+        return abi.decode(out, (address)) == who;
     }
 
     function _simulate(address trader) internal {
@@ -217,7 +241,17 @@ contract SimulatePriceSwing is Script {
 
     function _priceFromSqrt(uint160 sqrtPriceX96) internal pure returns (uint256 price1e18) {
         uint256 s = uint256(sqrtPriceX96);
-        price1e18 = (s * s * 1e18) >> 192;
+        // Shift HALFWAY before scaling. The obvious `(s * s * 1e18) >> 192`
+        // overflows: s is ~5.6e29 at a pool price of 50, so s*s is ~3.2e59 and
+        // multiplying by 1e18 reaches ~3.2e77 — past uint256's 1.16e77 ceiling.
+        // The limit bites at a price of only ~18, which earlier swing runs had
+        // already pushed this pool past, so the script reverted before sending
+        // a single transaction.
+        //
+        // Splitting the shift keeps every intermediate in range and loses no
+        // meaningful precision: s*s >> 96 is ~4.0e30, and scaling THAT by 1e18
+        // reaches ~4.0e48 with room to spare.
+        price1e18 = (((s * s) >> 96) * 1e18) >> 96;
     }
 
     function _to1e8(uint256 price1e18) internal pure returns (uint256) {
