@@ -1,0 +1,22 @@
+{
+  "name": "@stradebase/onchain",
+  "version": "0.1.0",
+  "description": "Typed backend client for the Stradebase royalty_shares + transfer_hook Solana programs",
+  "license": "UNLICENSED",
+  "private": true,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "sync-idl": "bash scripts/sync-idl.sh"
+  },
+  "dependencies": {
+    "@anchor-lang/core": "^1.1.2",
+    "@solana/spl-token": "^0.4.9",
+    "@solana/web3.js": "^1.98.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.3"
+  }
+}

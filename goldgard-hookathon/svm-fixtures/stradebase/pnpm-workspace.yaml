@@ -1,0 +1,20 @@
+# Centralised Stradebase monorepo.
+#
+#   packages/blockchain  — SBTS/USDC/USDT multi-token SDK (balances, transfers, ATAs, parsing)
+#   api/server           — unified backend API (mint/transfer/balance/freeze/history)
+#   api/onchain          — typed client for the royalty-shares + transfer-hook programs
+#
+# The Anchor workspace (programs/, tests/) and the Next.js admin app (sbtBoard/) manage
+# their own toolchains and are intentionally NOT pnpm workspace members.
+packages:
+  - "packages/*"
+  - "api/server"
+  - "api/onchain"
+
+# Explicitly decide the optional native build scripts pulled in by @solana/web3.js so
+# `pnpm install` (and `anchor test`) don't abort with ERR_PNPM_IGNORED_BUILDS.
+allowBuilds:
+  bigint-buffer: false
+  bufferutil: false
+  esbuild: true # needs its postinstall to fetch the platform binary (used by tsx)
+  utf-8-validate: false

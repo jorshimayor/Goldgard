@@ -1,0 +1,355 @@
+###############################################################################
+# Stradebase API — runnable requests (VS Code "REST Client" / JetBrains HTTP)
+#
+# Reference: ./api.md   ·   Devnet setup: ./devnet.md
+#
+# HOW TO USE
+#   1. Start the API:  pnpm --filter @stradebase/api dev   (needs api/server/.env)
+#   2. Fill in the variables below (wallet pubkeys + JSON secret-key arrays).
+#      A secret-key array is the content of a `solana-keygen` JSON file, e.g. [12,34,...,201].
+#   3. Click "Send Request" above each block. Run top-to-bottom for a full walkthrough.
+#      After "create listing", copy the returned `listing` + `shareMint` into @listing/@shareMint.
+#
+#   Devnet: point @baseUrl at your deployed API (or keep localhost with CLUSTER=devnet in .env).
+#   Custody mode: once SIGNER_URL is set, any write can send "keyRef": "<ref>" instead of "secret".
+###############################################################################
+
+@baseUrl=http://localhost:8080
+
+# --- ROLES: who signs what (see ./api.md → "Roles", and ./devnet.md) ---
+#   deployer = program upgrade authority (~/.config/solana/id.json). Signs `royalties/init`
+#              and, as the ops authority, the ops writes: distribute, admin/listing-status,
+#              admin/pause, admin/fee.
+#   admin    = platform custodial key (admin.json = the server's ADMIN_SECRET_KEY). It is the
+#              SBTS mint+freeze authority, the compliance authority, and the treasury. Signs the
+#              token side + royalty compliance: identity, pii, admin/block|unblock|compliance,
+#              hook-metas. @admin (pubkey) and @adminSecret must be the SAME admin.json wallet.
+#   owner / recipient / artist / buyer / buyer2 = ordinary end-user wallets for the demos.
+
+# --- wallet PUBLIC keys (base58) ---
+@admin=H7VpHzxz5XVoXF7wxgaFsUCZQcepaMiSN5Rb3sQWh5m4                                  # = solana address -k admin.json
+@owner=GdpfUUSqFjjWxnkdHrprcFax2cpHNss3rEfNjKWp25H9
+@recipient=CwXDaeJjF6csQbqWAQ8jKn3hJBUywKhyFjQHMqiYumyp
+@artist=3kvvRWXXp9K6XVsHbwf5T3bg5Vqg3w5ftztAzMhoSsRW
+@buyer=5UtgCHfn855g59xcisjCceVHquvRY32NKY8hJjz61P9F
+@buyer2=8JTorC5Xgem7hKpykUmhkunZs1xUvDQ5yFqbourp11qL
+
+
+# --- wallet SECRET keys (JSON arrays) — required for writes ---
+@adminSecret    = [62,61,235,242,108,92,66,255,216,191,57,10,222,45,245,69,98,147,141,47,240,68,77,170,67,19,27,63,114,103,164,19,239,101,14,174,136,90,193,198,175,6,126,103,227,148,2,150,163,245,211,184,160,8,59,158,186,21,220,68,117,30,232,123]           # admin.json — same wallet as @admin + ADMIN_SECRET_KEY
+@deployerSecret = [103,99,90,140,49,236,81,0,78,254,143,120,71,25,198,102,105,246,24,169,206,43,199,210,43,186,14,211,44,231,248,136,232,78,27,43,110,184,146,234,50,188,142,147,36,243,249,100,31,21,143,127,226,12,217,118,253,182,160,170,143,80,97,240]  # ~/.config/solana/id.json (upgrade authority)
+@artistSecret   = [141,36,156,56,33,128,168,185,68,14,109,170,132,42,52,91,130,221,60,148,0,42,61,241,196,18,141,20,31,87,134,87,40,248,81,65,50,207,84,246,54,95,240,212,213,181,176,0,78,103,235,207,68,81,78,169,0,5,2,74,112,86,68,221]
+@buyerSecret    = [154,97,171,29,188,219,120,99,253,141,172,218,184,205,164,152,215,209,187,138,151,172,44,37,161,235,86,27,33,201,126,48,66,147,220,10,21,177,55,210,241,71,220,106,244,203,32,35,228,15,176,104,122,246,89,19,247,157,250,217,94,221,39,230]
+
+# --- filled in from responses as you go ---
+@listing   = REPLACE_from_create_listing_response
+@shareMint = REPLACE_from_create_listing_response
+
+
+###############################################################################
+# HEALTH & DISCOVERY
+###############################################################################
+
+### Liveness
+GET {{baseUrl}}/health
+
+### Supported tokens (mintable/freezable flags)
+GET {{baseUrl}}/tokens
+
+
+###############################################################################
+# TOKENS — SBTS / USDC / USDT
+###############################################################################
+
+### Mint 100 SBTS to the owner (custodial; SBTS only)
+POST {{baseUrl}}/mint
+Content-Type: application/json
+
+{ "to": "{{owner}}", "amount": "100" }
+
+### All balances for the owner (SBTS + USDC + USDT)
+GET {{baseUrl}}/balances/{{owner}}
+
+### Unified balance: one SBTS (GBP) total across all tokens, decimals + FX resolved server-side
+GET {{baseUrl}}/balances/{{owner}}/unified
+
+### One balance (SBTS)
+GET {{baseUrl}}/balances/{{owner}}/SBTS
+
+### Transfer 10 SBTS from the owner to a recipient (owner signs via fromSecret)
+POST {{baseUrl}}/transfer
+Content-Type: application/json
+
+{ "to": "{{recipient}}", "symbol": "SBTS", "amount": "10", "fromSecret": {{adminSecret}} }
+
+### Transfer 5 USDC from the treasury (admin) to a recipient (omit fromSecret)
+POST {{baseUrl}}/transfer
+Content-Type: application/json
+
+{ "to": "{{recipient}}", "symbol": "USDC", "amount": "5" }
+
+### Transfer 5 USDT from the treasury to a recipient
+POST {{baseUrl}}/transfer
+Content-Type: application/json
+
+{ "to": "{{recipient}}", "symbol": "USDT", "amount": "5" }
+
+
+###############################################################################
+# TRANSACTION HISTORY
+###############################################################################
+
+### Combined history across SBTS + USDC + USDT (newest first)
+GET {{baseUrl}}/history/{{owner}}?limit=20
+
+### Per-token history (SBTS), paginate with &before=<signature>
+GET {{baseUrl}}/history/{{owner}}/SBTS?limit=20
+
+### USDC history
+GET {{baseUrl}}/history/{{owner}}/USDC?limit=20
+
+### USDT history
+GET {{baseUrl}}/history/{{owner}}/USDT?limit=20
+
+
+###############################################################################
+# ADMIN — TOKEN FREEZE (SBTS only; USDC/USDT return 400 by design)
+###############################################################################
+
+### Freeze the owner's SBTS account
+POST {{baseUrl}}/admin/freeze
+Content-Type: application/json
+
+{ "owner": "{{owner}}", "symbol": "SBTS" }
+
+### Thaw it again
+POST {{baseUrl}}/admin/thaw
+Content-Type: application/json
+
+{ "owner": "{{owner}}", "symbol": "SBTS" }
+
+### (Expected 400) Attempt to freeze USDC — not our mint
+POST {{baseUrl}}/admin/freeze
+Content-Type: application/json
+
+{ "owner": "{{owner}}", "symbol": "USDC" }
+
+
+###############################################################################
+# BULK DISTRIBUTION (sale / drop) — pre-mint once, then parallel pooled transfers
+# Needs FEE_PAYER_SECRETS set on the server for real parallelism.
+###############################################################################
+
+### 1. Pre-mint SBTS into each pool source account (one-time, before the sale)
+POST {{baseUrl}}/distribute/prefund
+Content-Type: application/json
+
+{ "amountEach": "100000" }
+
+### 2. Distribute to many recipients concurrently (Idempotency-Key makes the batch safe to retry)
+POST {{baseUrl}}/distribute
+Content-Type: application/json
+Idempotency-Key: sale-2024-batch-1
+
+{ "recipients": [ { "to": "{{owner}}", "amount": "5" }, { "to": "{{recipient}}", "amount": "10" } ] }
+
+
+###############################################################################
+# NFTs (Metaplex Core) — needs the Core program on your cluster
+###############################################################################
+
+### Create a collection (optional)
+POST {{baseUrl}}/nfts/collection
+Content-Type: application/json
+
+{ "name": "Stradebase Tiers", "uri": "https://cdn.stradebase.xyz/collection.json" }
+
+### Mint a tier NFT to the owner (uri = an uploaded assets/nft-metadata file)
+POST {{baseUrl}}/nfts/mint
+Content-Type: application/json
+
+{ "name": "Gold Season 1", "uri": "https://cdn.stradebase.xyz/gold1.json", "owner": "{{owner}}" }
+
+### Inspect an NFT (paste the asset address from the mint response)
+GET {{baseUrl}}/nfts/REPLACE_asset_address
+
+### Freeze an NFT
+POST {{baseUrl}}/admin/nft/freeze
+Content-Type: application/json
+
+{ "asset": "REPLACE_asset_address" }
+
+### Thaw an NFT
+POST {{baseUrl}}/admin/nft/thaw
+Content-Type: application/json
+
+{ "asset": "REPLACE_asset_address" }
+
+
+###############################################################################
+# ROYALTY SHARES — full lifecycle
+# Requires royalty_shares + transfer_hook deployed (anchor deploy).
+###############################################################################
+
+### 1. Initialize the platform (ONCE; signer = program upgrade authority = deployer).
+### The init signer becomes the OPS authority; complianceAuthority + treasury are set to the ADMIN
+### wallet, which is the key that signs the compliance calls below.
+POST {{baseUrl}}/royalties/init
+Content-Type: application/json
+
+{ "secret": {{deployerSecret}}, "complianceAuthority": "{{admin}}", "treasury": "{{admin}}", "platformFeeBps": 200, "maxGlobalOwnershipBps": 10000 }
+
+### Read the global config
+GET {{baseUrl}}/royalties/config
+
+### 2. Register the buyer's KYC (signer = compliance authority)
+POST {{baseUrl}}/royalties/identity
+Content-Type: application/json
+
+### Personal data is hashed by the API — only the 32-byte commitment lands on-chain.
+### SAVE the `salt` from the response: without it the commitment can never be re-derived.
+{ "secret": {{adminSecret}}, "user": "{{buyer}}", "kycLevel": 2, "jurisdiction": "GB",
+  "accredited": true, "status": "ok",
+  "pii": { "firstName": "Ada", "lastName": "Lovelace", "dob": "1815-12-10", "postcode": "SW1A 1AA" } }
+
+### Read the identity (status + piiCommitment + piiVersion; no personal data)
+GET {{baseUrl}}/royalties/identity/{{buyer}}
+
+### Soft-freeze a wallet under review: may still hold and receive, may not buy or send
+POST {{baseUrl}}/royalties/identity
+Content-Type: application/json
+
+{ "secret": {{adminSecret}}, "user": "{{buyer}}", "kycLevel": 2, "jurisdiction": "GB", "status": "restricted" }
+
+### Re-commit PII after a re-verification, leaving compliance status untouched
+POST {{baseUrl}}/royalties/pii
+Content-Type: application/json
+
+{ "secret": {{adminSecret}}, "user": "{{buyer}}",
+  "pii": { "firstName": "Ada", "lastName": "Byron", "dob": "1815-12-10", "postcode": "SW1A 1AA" } }
+
+### 2b. Create platform profiles (once per wallet at signup — required before listing/buying)
+POST {{baseUrl}}/royalties/profile
+Content-Type: application/json
+
+{ "secret": {{artistSecret}}, "role": "artist" }
+
+###
+POST {{baseUrl}}/royalties/profile
+Content-Type: application/json
+
+{ "secret": {{buyerSecret}}, "role": "investor" }
+
+### Read a profile (role + listings_created + trades_count)
+GET {{baseUrl}}/royalties/profile/{{buyer}}
+
+### 2c. Claim a public username (opt-in — signed by the user, rent paid by the platform)
+POST {{baseUrl}}/royalties/username
+Content-Type: application/json
+
+{ "secret": {{buyerSecret}}, "username": "ada_l", "payerSecret": {{adminSecret}} }
+
+### Resolve a username → owner (null when unclaimed). Uniqueness is enforced on-chain.
+GET {{baseUrl}}/royalties/username/ada_l
+
+### Give the name up (rent refunded, name becomes claimable again)
+POST {{baseUrl}}/royalties/username/release
+Content-Type: application/json
+
+{ "secret": {{buyerSecret}}, "username": "ada_l" }
+
+### Change a role (signer = the profile owner)
+POST {{baseUrl}}/royalties/profile/role
+Content-Type: application/json
+
+{ "secret": {{buyerSecret}}, "role": "both" }
+
+### 3. Create a listing (signer = artist). COPY listing + shareMint from the response into the vars above.
+POST {{baseUrl}}/royalties/listings
+Content-Type: application/json
+
+{ "secret": {{artistSecret}}, "songId": "song-0001", "metadataUri": "https://cdn.stradebase.xyz/song-0001.json",
+  "totalShares": 1000, "pricePerShare": 1000000000, "lockupSeconds": 0, "requiresAccredited": false, "allowedJurisdictions": [], "maxSharesPerWallet": 0 }
+
+### List all listings
+GET {{baseUrl}}/royalties/listings
+
+### 4. Initialize the transfer-hook resolver for the mint (needed before secondary transfers)
+POST {{baseUrl}}/royalties/hook-metas
+Content-Type: application/json
+
+{ "secret": {{adminSecret}}, "shareMint": "{{shareMint}}" }
+
+### 5. Buy 10 shares (signer = buyer). Moves NO money — payment is settled off-chain first;
+### `settlementAmount` (minor units) is recorded on the trade as the audit reference.
+POST {{baseUrl}}/royalties/buy
+Content-Type: application/json
+
+{ "secret": {{buyerSecret}}, "listing": "{{listing}}", "shares": 10, "settlementAmount": 10000000000 }
+
+### Read the buyer's position (lockup unlock time)
+GET {{baseUrl}}/royalties/positions/{{shareMint}}/{{buyer}}
+
+### 6. Record a royalty distribution the platform paid off-chain (signer = ops authority).
+### No funds move on-chain; `reference` is your off-chain payout-batch id.
+POST {{baseUrl}}/royalties/distribute
+Content-Type: application/json
+
+{ "secret": {{deployerSecret}}, "listing": "{{listing}}", "totalAmount": 10000000000, "reference": "batch-2026-07" }
+
+### 7. Read the recorded distributions (audit trail)
+GET {{baseUrl}}/royalties/distributions/{{listing}}
+
+### 8. Secondary sale (signer = seller). Transfers shares AND writes an on-chain TradeRecord
+### atomically — the record instruction fails unless the matching transfer is in the same tx.
+POST {{baseUrl}}/royalties/transfer
+Content-Type: application/json
+
+{ "secret": {{buyerSecret}}, "listing": "{{listing}}", "buyer": "{{buyer2}}", "shares": 3, "settlementAmount": 3000000 }
+
+### 9. Full on-chain trade history for the listing (primary → secondary), read from the chain.
+GET {{baseUrl}}/royalties/trades/{{listing}}
+
+### 10. Reconciliation audit net: any share move with no on-chain TradeRecord (should be empty).
+GET {{baseUrl}}/royalties/reconcile/{{listing}}
+
+
+###############################################################################
+# ROYALTY ADMIN / COMPLIANCE
+###############################################################################
+
+### Block a wallet on a listing (signer = compliance authority)
+POST {{baseUrl}}/royalties/admin/block
+Content-Type: application/json
+
+{ "secret": {{adminSecret}}, "shareMint": "{{shareMint}}", "user": "{{recipient}}" }
+
+### Unblock it
+POST {{baseUrl}}/royalties/admin/unblock
+Content-Type: application/json
+
+{ "secret": {{adminSecret}}, "shareMint": "{{shareMint}}", "user": "{{recipient}}" }
+
+### Set the per-wallet cap for a listing
+POST {{baseUrl}}/royalties/admin/compliance
+Content-Type: application/json
+
+{ "secret": {{adminSecret}}, "shareMint": "{{shareMint}}", "maxSharesPerWallet": 50 }
+
+### Pause a listing (ops authority) — status: active | paused | closed
+POST {{baseUrl}}/royalties/admin/listing-status
+Content-Type: application/json
+
+{ "secret": {{deployerSecret}}, "listing": "{{listing}}", "status": "paused" }
+
+### Global circuit breaker (ops authority)
+POST {{baseUrl}}/royalties/admin/pause
+Content-Type: application/json
+
+{ "secret": {{deployerSecret}}, "paused": true }
+
+### Adjust the platform fee, in basis points (ops authority)
+POST {{baseUrl}}/royalties/admin/fee
+Content-Type: application/json
+
+{ "secret": {{deployerSecret}}, "platformFeeBps": 250 }
