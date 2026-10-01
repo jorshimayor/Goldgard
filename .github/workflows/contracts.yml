@@ -26,10 +26,16 @@ jobs:
       - name: Test
         run: forge test
 
+      # Coverage is an informational report, not a correctness gate (Build + Test
+      # above are). Some contracts are too complex to compile under coverage's
+      # instrumentation even with --ir-minimum (a Yul "stack too deep"), so a
+      # coverage compile failure must not fail the job. --no-match-coverage drops
+      # scripts/mocks/test helpers from the report (and reduces what must compile).
       - name: Coverage (summary)
+        continue-on-error: true
         env:
           FOUNDRY_INVARIANT_RUNS: "8"
           FOUNDRY_INVARIANT_DEPTH: "32"
           FOUNDRY_FUZZ_RUNS: "32"
-        run: forge coverage --report summary --ir-minimum --exclude-tests
+        run: forge coverage --report summary --ir-minimum --exclude-tests --no-match-coverage "(script|test|mock|Mock)"
 
