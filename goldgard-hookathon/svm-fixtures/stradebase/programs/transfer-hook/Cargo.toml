@@ -1,0 +1,34 @@
+[package]
+name = "transfer_hook"
+version = "0.1.0"
+description = "Token-2022 transfer-hook compliance program for Stradebase royalty shares"
+edition.workspace = true
+rust-version.workspace = true
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "transfer_hook"
+
+[features]
+default = []
+cpi = ["no-entrypoint"]
+no-entrypoint = []
+no-log-ix-name = []
+idl-build = ["anchor-lang/idl-build", "anchor-spl/idl-build"]
+anchor-debug = []
+custom-heap = []
+custom-panic = []
+
+
+[dependencies]
+anchor-lang = { workspace = true }
+anchor-spl = { workspace = true }
+spl-tlv-account-resolution = { workspace = true }
+spl-transfer-hook-interface = { workspace = true }
+spl-discriminator = "0.4.1"
+# Read-only access to the main program's compliance account types.
+royalty_shares = { path = "../royalty-shares", features = ["no-entrypoint", "cpi"] }
+
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("solana"))'] }

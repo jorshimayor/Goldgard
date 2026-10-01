@@ -1,0 +1,15 @@
+.anchor
+.DS_Store
+target
+**/*.rs.bk
+node_modules
+test-ledger
+.yarn
+.surfpool
+admin.json
+sbts-mint.json
+.env
+admin.json
+artist.json
+buyer.json
+buyer2.json
